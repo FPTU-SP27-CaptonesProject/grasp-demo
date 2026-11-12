@@ -126,7 +126,8 @@ cmd_start() {
 import json, sys
 h = json.load(sys.stdin)
 for name, c in h["columns"].items():
-    print(f"  {name:11s} {\"ok\" if c[\"enabled\"] else \"OFF: \" + str(c[\"reason\"])}")
+    state = "ok" if c["enabled"] else "OFF: " + str(c["reason"])
+    print("  %-11s %s" % (name, state))
 print("  GRPO label:", h["adapters"].get("grpo", {}).get("label"), "| eval questions:", h["eval_questions"], "| showcase:", h["showcase_questions"])'
   say "open on your PC: ssh -p <port> root@<host> -L 7860:localhost:7860  ->  http://localhost:7860"
 }
