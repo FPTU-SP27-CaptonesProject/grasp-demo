@@ -18,10 +18,13 @@ def load_config(path: str | Path) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise ValueError("models.yaml must contain a mapping")
     config["_root"] = source.parent
+    for section in ("reader", "retrieval", "proxy", "eval"):
+        if config.get(section) is None:
+            config[section] = {}
     for section, key in PATH_KEYS:
-        if config.get(section, {}).get(key):
+        if (config.get(section) or {}).get(key):
             config[section][key] = str(resolve(config, config[section][key]))
-    adapters = config.get("proxy", {}).get("adapters", {}) or {}
+    adapters = (config.get("proxy") or {}).get("adapters") or {}
     for name, value in list(adapters.items()):
         entry = {"path": value} if isinstance(value, str) else dict(value or {})
         if not entry.get("path"):

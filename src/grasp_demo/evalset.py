@@ -15,7 +15,7 @@ def load_ids(path: str | None) -> set[str]:
 def load_eval_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
     from grasp_grpo.data import read_examples
 
-    values = config.get("eval", {})
+    values = (config.get("eval") or {})
     path = values.get("qa")
     if not path or not Path(path).is_file():
         return []

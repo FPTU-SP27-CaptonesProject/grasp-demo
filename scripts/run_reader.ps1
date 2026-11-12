@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $true)] [string] $Model,
     [string] $LlamaServer = "llama-server.exe",
     [int] $Port = 8080,
-    [int] $Context = 8192,
+    [int] $Context = 32768,
     [int] $Parallel = 4
 )
 

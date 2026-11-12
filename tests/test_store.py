@@ -48,3 +48,18 @@ def test_two_connections_each_receive_every_event(tmp_path):
         assert sum('"thought"' in chunk for chunk in chunks) == 1
         assert sum('"answer"' in chunk for chunk in chunks) == 1
         assert chunks[-1].startswith("event: close")
+
+
+def test_history_skips_corrupt_and_unreadable_files(tmp_path):
+    store = RunStore(tmp_path)
+    run = store.create({"example": {"question": "Q"}})
+    store.persist(run)
+    (tmp_path / "99999999-000000-bad.jsonl").write_text("{not json\n", encoding="utf-8")
+    (tmp_path / "99999999-000001-bin.jsonl").write_bytes(b"\xff\xfe\x00\xff\n")
+    assert [item["id"] for item in store.history()] == [run.run_id]
+
+
+def test_persist_writes_through_a_tmp_file(tmp_path):
+    store = RunStore(tmp_path)
+    path = store.persist(store.create({}))
+    assert path.is_file() and not list(tmp_path.glob("*.tmp"))

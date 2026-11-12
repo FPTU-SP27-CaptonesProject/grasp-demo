@@ -33,7 +33,7 @@ def create_app(config_path: str | Path, *, services: DemoServices | None = None)
     load_dotenv(config["_root"])
     store = RunStore(config.get("runs_dir", Path(config["_root"]) / "runs"))
     eval_rows = load_eval_rows(config)
-    showcase_ids = load_ids(config.get("eval", {}).get("showcase")) & {row["id"] for row in eval_rows}
+    showcase_ids = load_ids((config.get("eval") or {}).get("showcase")) & {row["id"] for row in eval_rows}
     services = services or DemoServices.from_config(config)
     started = time.monotonic()
     prerun: dict[str, Any] = {"running": False, "done": 0, "total": 0, "error": None}
@@ -65,8 +65,10 @@ def create_app(config_path: str | Path, *, services: DemoServices | None = None)
                 for future in as_completed([pool.submit(one, column) for column in columns]):
                     future.result()
         finally:
-            store.persist(run)
-            run.close()
+            try:
+                store.persist(run)
+            finally:
+                run.close()
 
     def new_run(example: dict[str, Any], columns: list[str], **extra: Any) -> DemoRun:
         return store.create({"example": example, "columns": columns, "config": str(config.get("_root")), **extra})

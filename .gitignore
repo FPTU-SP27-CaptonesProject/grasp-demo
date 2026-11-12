@@ -6,3 +6,5 @@ data/
 checkpoints/
 runs/*.jsonl
 !runs/.gitkeep
+runs/*.json
+runs/*.yaml

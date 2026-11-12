@@ -28,6 +28,11 @@ def pick_questions(rows: list[dict[str, Any]], per_dataset: int = 2) -> list[dic
     return chosen
 
 
+def local_seconds(columns: dict[str, dict[str, Any]]) -> float:
+    """Slowest non-Bedrock column (the Bedrock column is remote and excluded from speed)."""
+    return max((v["seconds"] for c, v in columns.items() if c != BEDROCK and "seconds" in v), default=0.0)
+
+
 def judge(result: dict[str, Any]) -> dict[str, bool | None]:
     health = all(item.get("ready") for name, item in result["health"].items() if name != "strong")
     vram = result.get("vram_peak_gb") is not None and result["vram_peak_gb"] <= THRESHOLDS["vram_gb"]
@@ -80,6 +85,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--config", required=True)
     parser.add_argument("--report", help="test999 report of the configured GRPO checkpoint (has predictions)")
     args = parser.parse_args(argv)
+    reported = {}
+    if args.report:
+        reported = {p["id"]: p["prediction"] for p in json.loads(Path(args.report).read_text(encoding="utf-8")).get("predictions", [])}
+    else:
+        print("No --report: grpo_matches will be unknown, so local_ok cannot be True (pass the test999 GRPO report).")
     config = load_config(args.config)
     load_dotenv(config["_root"])
     sampler = VramSampler()
@@ -89,9 +99,6 @@ def main(argv: list[str] | None = None) -> None:
         services = DemoServices.from_config(config)
         for name, item in services.health.items():
             print(f"{name:10s} {'ok' if item['ready'] else 'FAIL ' + item.get('reason', '')}")
-        reported = {}
-        if args.report:
-            reported = {p["id"]: p["prediction"] for p in json.loads(Path(args.report).read_text(encoding="utf-8")).get("predictions", [])}
         columns = [column for column in COLUMNS if services.enabled(column)[0]]
         questions = []
         for row in pick_questions(load_eval_rows(config)):
@@ -107,13 +114,14 @@ def main(argv: list[str] | None = None) -> None:
             started = time.monotonic()
             with ThreadPoolExecutor(max_workers=max(1, len(columns))) as pool:
                 per_column = dict(pool.map(one, columns))
-            entry = {"id": row["id"], "dataset": row.get("metadata", {}).get("dataset"), "seconds": time.monotonic() - started, "columns": per_column}
+            wall = time.monotonic() - started
+            entry = {"id": row["id"], "dataset": row.get("metadata", {}).get("dataset"), "seconds": local_seconds(per_column), "wall_seconds": wall, "columns": per_column}
             grpo = per_column.get("grasp_grpo", {})
             if row["id"] in reported and "prediction" in grpo:
                 entry["grpo_matches_report"] = exact(grpo["prediction"], [reported[row["id"]]]) == 1.0
             questions.append(entry)
             cells = "  ".join(f"{c}={v['seconds']:.1f}s" if "seconds" in v else f"{c}=ERR" for c, v in per_column.items())
-            print(f"{row['id']:>24s} {entry['seconds']:5.1f}s  {cells}")
+            print(f"{row['id']:>24s} {entry['seconds']:5.1f}s (wall {wall:5.1f}s)  {cells}")
     finally:
         sampler.stopped.set()
         sampler.join(timeout=5)

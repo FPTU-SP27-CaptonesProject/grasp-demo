@@ -82,7 +82,7 @@ class DemoServices:
         self.retriever_lock = threading.Lock()
         self.health: dict[str, dict[str, Any]] = {}
         self.adapter_errors: dict[str, str] = {}
-        adapters = config.get("proxy", {}).get("adapters", {}) or {}
+        adapters = (config.get("proxy") or {}).get("adapters") or {}
         self.adapter_metadata = {name: {"label": entry["label"], "path": entry["path"]} for name, entry in adapters.items()}
 
     @classmethod

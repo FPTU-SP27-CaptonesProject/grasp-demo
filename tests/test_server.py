@@ -88,3 +88,19 @@ def test_prerun_refuses_a_second_concurrent_prerun(tmp_path, monkeypatch):
         status = client.get("/api/prerun").json()
         assert status == {"running": False, "done": 1, "total": 1, "error": None}
         assert len(client.get("/api/history").json()) == 1
+
+
+def test_stream_still_closes_when_persist_fails(tmp_path, monkeypatch):
+    def fake_run(services, column, example, emit):
+        emit("done", {"seconds": 0.1, "retrievals": 1, "f1": None, "em": None, "recall": None})
+
+    def boom(self, run):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("grasp_demo.server.run_column", fake_run)
+    monkeypatch.setattr("grasp_demo.store.RunStore.persist", boom)
+    app = create_app(make_config(tmp_path), services=Services())
+    with TestClient(app) as client:
+        run_id = client.post("/api/ask", json={"question": "Free?", "columns": ["rag_7b"]}).json()["run_id"]
+        response = client.get(f"/api/stream/{run_id}")
+        assert "event: close" in response.text

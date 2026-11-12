@@ -61,16 +61,22 @@ class RunStore:
         with run.changed:
             events = list(run.events)
         rows = [{"type": "request", "data": run.request, "run_id": run.run_id, "created_at": run.created_at}, *events]
-        path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+        partial = path.with_suffix(".jsonl.tmp")
+        partial.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+        partial.replace(path)
         return path
 
     def history(self) -> list[dict[str, Any]]:
         result = []
         for path in sorted(self.runs_dir.glob("*.jsonl"), reverse=True):
-            first = path.open(encoding="utf-8").readline()
-            if not first:
+            try:
+                with path.open(encoding="utf-8") as handle:
+                    first = handle.readline()
+                record = json.loads(first) if first else None
+            except (OSError, ValueError):
+                continue  # unreadable or corrupt saved run: skip it
+            if not isinstance(record, dict):
                 continue
-            record = json.loads(first)
             result.append({"id": record.get("run_id"), "file": path.name, "request": record.get("data", {}), "created_at": record.get("created_at")})
         return result
 

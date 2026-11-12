@@ -192,8 +192,8 @@ async function ask() {
   const stream = new EventSource(`/api/stream/${run_id}`);
   state.stream = stream;
   stream.onmessage = (e) => { try { applyEvent(JSON.parse(e.data)); } catch (err) { console.error('applyEvent failed', err, e.data); notice('Bỏ qua một sự kiện không hiển thị được (xem console).'); } };
-  stream.addEventListener('close', () => stream.close());
-  stream.onerror = () => { if (stream.readyState === EventSource.CLOSED) notice('Mất kết nối tới server.'); stream.close(); };
+  stream.addEventListener('close', () => { stream.onerror = null; stream.close(); });
+  stream.onerror = () => { notice('Mất kết nối với server. Lần chạy vẫn được lưu, xem lại trong Lịch sử.'); stream.close(); };
 }
 
 async function health() {

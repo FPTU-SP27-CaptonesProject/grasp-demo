@@ -39,3 +39,8 @@ def test_eval_rows_are_filtered_by_ids(tmp_path):
     assert [row["id"] for row in load_eval_rows(config)] == ["a", "c"]
     assert load_ids(None) == set()
     assert load_ids(str(tmp_path / "missing.json")) == set()
+
+
+def test_empty_yaml_sections_become_empty_mappings(tmp_path):
+    config = load_config(write(tmp_path, "eval:\nproxy:\nretrieval:\nreader:\n"))
+    assert config["eval"] == {} and config["proxy"] == {} and config["retrieval"] == {} and config["reader"] == {}
