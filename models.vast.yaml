@@ -8,7 +8,7 @@ proxy:
   api_key_env: READER_API_KEY
   adapters:
     sft:  {path: /workspace/checkpoints/grasp-qwen2.5-3b-sft, label: "SFT"}
-    grpo: {path: /workspace/ckpts/s100, label: "GRPO s100"}
+    grpo: {path: /workspace/ckpts/s250, label: "GRPO s250 · test F1 0.552"}
 retrieval: {corpus_config: /workspace/data/corpus.json, top_k: 10, max_candidate_triples: 20, encoder: intfloat/e5-large-v2, encoder_device: "cuda:1"}
 ircot:    {max_steps: 5, docs_per_step: 3}
 grasp:    {max_steps: 5}

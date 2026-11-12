@@ -17,7 +17,7 @@ pip install -e "../grasp-grpo-trainer[rollout]" -e ".[dev]"
 ```powershell
 python scripts/fetch_data.py --trainer-dir ../grasp-grpo-trainer
 python scripts/fetch_checkpoint.py doancuavahk/grasp-qwen2.5-3b-sft grasp-qwen2.5-3b-sft
-python scripts/fetch_checkpoint.py doancuavahk/grasp-grpo-checkpoints grpo-s100 --subfolder s100
+python scripts/fetch_checkpoint.py doancuavahk/grasp-grpo-checkpoints grpo-s250 --subfolder s250
 ```
 `.env` holds `BEDROCK_API_KEY` (copy it from `grasp/.env`; it is gitignored). Without it, only the 235B column is off.
 
@@ -32,7 +32,7 @@ python scripts/fetch_checkpoint.py doancuavahk/grasp-grpo-checkpoints grpo-s100 
      `pip install -e /workspace/grasp-demo` (or `uv pip install -e /workspace/grasp-demo`).
   2. `export READER_API_KEY=... BEDROCK_API_KEY=...` in the shell, or put them in `/workspace/grasp-demo/.env`.
   3. Fetch the GRPO checkpoint on a fresh box:
-     `python scripts/fetch_checkpoint.py doancuavahk/grasp-grpo-checkpoints s100 --subfolder s100 --root /workspace/ckpts`
+     `python scripts/fetch_checkpoint.py doancuavahk/grasp-grpo-checkpoints s250 --subfolder s250 --root /workspace/ckpts`
   4. `python scripts/fetch_data.py --skip-download --root /workspace/data --trainer-dir /workspace/grasp-grpo-trainer`
   5. Check `models.vast.yaml`: `reader.model` must equal the box's `READER_MODEL`, and `encoder_device: "cuda:1"` needs
      a 2-GPU box (use `"cuda:0"` or `cpu` on a single GPU).

@@ -5,7 +5,7 @@ proxy:
   backend: hf
   adapters:
     sft:  {path: checkpoints/grasp-qwen2.5-3b-sft, label: "SFT"}
-    grpo: {path: checkpoints/grpo-s100, label: "GRPO s100"}
+    grpo: {path: checkpoints/grpo-s250, label: "GRPO s250 · test F1 0.552"}
 retrieval: {corpus_config: data/corpus.json, top_k: 10, max_candidate_triples: 20, encoder: intfloat/e5-large-v2, encoder_device: cpu}
 ircot:    {max_steps: 5, docs_per_step: 3}
 grasp:    {max_steps: 5}
