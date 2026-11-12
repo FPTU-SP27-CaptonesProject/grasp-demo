@@ -191,7 +191,7 @@ async function ask() {
   if (generation !== state.generation) return;
   const stream = new EventSource(`/api/stream/${run_id}`);
   state.stream = stream;
-  stream.onmessage = (e) => { try { applyEvent(JSON.parse(e.data)); } catch (err) { /* skip malformed event */ } };
+  stream.onmessage = (e) => { try { applyEvent(JSON.parse(e.data)); } catch (err) { console.error('applyEvent failed', err, e.data); notice('Bỏ qua một sự kiện không hiển thị được (xem console).'); } };
   stream.addEventListener('close', () => stream.close());
   stream.onerror = () => { if (stream.readyState === EventSource.CLOSED) notice('Mất kết nối tới server.'); stream.close(); };
 }
@@ -223,7 +223,7 @@ async function replay(row) {
     const t = Number(event.t) || 0;
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, ((t - previous) * 1000) / speed)));
     if (generation !== state.generation) return;
-    try { applyEvent(event); } catch (err) { /* skip malformed event */ }
+    try { applyEvent(event); } catch (err) { console.error('applyEvent failed', err, event); notice('Bỏ qua một sự kiện không hiển thị được (xem console).'); }
     previous = t;
   }
 }
