@@ -1,4 +1,5 @@
 import json
+import threading
 
 from fastapi.testclient import TestClient
 
@@ -6,6 +7,8 @@ from grasp_demo.server import create_app
 
 
 class Services:
+    adapter_metadata = {"sft": {"label": "SFT", "path": "x"}}
+
     def __init__(self):
         self.health = {"reader": {"ready": True}, "retriever": {"ready": True}, "proxy": {"ready": True}, "strong": {"ready": True}}
 
@@ -18,11 +21,12 @@ class Services:
 
 def make_config(tmp_path):
     qa = tmp_path / "qa.jsonl"
-    qa.write_text(json.dumps({"id": "q1", "question": "Question?", "gold_answers": ["answer"], "gold_doc_ids": ["doc"], "dataset": "wiki18"}) + "\n", encoding="utf-8")
-    ids = tmp_path / "ids.json"
-    ids.write_text(json.dumps({"ids": ["q1"]}), encoding="utf-8")
+    rows = [{"id": i, "question": f"Question {i}?", "gold_answers": ["answer"], "gold_doc_ids": ["doc"], "dataset": "wiki18"} for i in ("q1", "q2")]
+    qa.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+    (tmp_path / "ids.json").write_text(json.dumps({"ids": ["q1", "q2"]}), encoding="utf-8")
+    (tmp_path / "showcase.json").write_text(json.dumps({"ids": ["q2"]}), encoding="utf-8")
     config = tmp_path / "models.yaml"
-    config.write_text(f"eval:\n  qa: {qa.name}\n  ids: {ids.name}\nruns_dir: runs\n", encoding="utf-8")
+    config.write_text("eval:\n  qa: qa.jsonl\n  ids: ids.json\n  showcase: showcase.json\nruns_dir: runs\n", encoding="utf-8")
     return config
 
 
@@ -53,3 +57,34 @@ def test_free_question_has_no_scores(tmp_path, monkeypatch):
         response = client.post("/api/ask", json={"question": "Free?", "corpus": "wiki18", "columns": ["rag_7b"]})
         assert response.status_code == 200
         assert client.get("/api/eval").json()[0]["id"] == "q1"
+
+
+def test_eval_lists_showcase_questions(tmp_path):
+    app = create_app(make_config(tmp_path), services=Services())
+    with TestClient(app) as client:
+        assert [row["id"] for row in client.get("/api/eval").json()] == ["q1", "q2"]
+        assert [row["id"] for row in client.get("/api/eval?showcase=1").json()] == ["q2"]
+        assert client.get("/api/health").json()["showcase_questions"] == 1
+
+
+def test_prerun_refuses_a_second_concurrent_prerun(tmp_path, monkeypatch):
+    release = threading.Event()
+
+    def slow_run(services, column, example, emit):
+        release.wait(5)
+        emit("done", {"seconds": 0.1, "retrievals": 0, "f1": 1.0, "em": 1.0, "recall": 1.0})
+
+    monkeypatch.setattr("grasp_demo.server.run_column", slow_run)
+    app = create_app(make_config(tmp_path), services=Services())
+    with TestClient(app) as client:
+        first = client.post("/api/prerun")
+        assert first.status_code == 200 and first.json()["total"] == 1
+        assert client.post("/api/prerun").status_code == 409
+        release.set()
+        for _ in range(50):
+            if not client.get("/api/prerun").json()["running"]:
+                break
+            threading.Event().wait(0.1)
+        status = client.get("/api/prerun").json()
+        assert status == {"running": False, "done": 1, "total": 1, "error": None}
+        assert len(client.get("/api/history").json()) == 1
