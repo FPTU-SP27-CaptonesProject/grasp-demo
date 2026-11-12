@@ -50,8 +50,8 @@ def run_column(services, column: str, example: dict[str, Any], emit: ColumnEmit)
         config = services.config.get("ircot", {})
         result = run_ircot(services.reader, bound, example, max_steps=int(config.get("max_steps", 5)), docs_per_step=int(config.get("docs_per_step", 3)), emit=traced)
     else:
-        adapter = "sft" if column == "grasp_sft" else "grpo"
-        result = run_example(services.proxy.generate(adapter), services.reader, bound, example, int(services.config.get("grasp", {}).get("max_steps", 5)), emit=traced)
+        adapter = column.removeprefix("grasp_")
+        result = run_example(services.proxy.generate_fn(adapter), services.reader, bound, example, int(services.config.get("grasp", {}).get("max_steps", 5)), emit=traced)
 
     result["retrievals"] = result.get("retrievals", retrievals)
     metrics = score(example, result)
