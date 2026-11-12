@@ -62,19 +62,26 @@ class VLLMProxy:
 
                 return VLLMPolicy(url, api_key, load_tokenizer(path), model=served, timeout=60.0)
         self.admin, self.names, self.policies = admin, {}, {}
-        for name, entry in adapters.items():
-            served = f"{PREFIX}{name}"
-            self._load(served, entry["path"])
-            self.names[name] = served
-            self.policies[name] = policy_factory(served, entry["path"])
+        try:
+            for name, entry in adapters.items():
+                served = f"{PREFIX}{name}"
+                self._load(served, entry["path"])
+                self.names[name] = served  # before policy_factory, so close() unloads it if that fails
+                self.policies[name] = policy_factory(served, entry["path"])
+        except BaseException:
+            self.close()  # unload what this constructor loaded; the server outlives the failed demo
+            raise
 
     def _load(self, served: str, path: str) -> None:
         payload = {"lora_name": served, "lora_path": path}
         try:
             self.admin.post("load_lora_adapter", payload)
-        except RuntimeError:  # a previous demo server left the name loaded
-            self.admin.post("unload_lora_adapter", {"lora_name": served})
-            self.admin.post("load_lora_adapter", payload)
+        except RuntimeError as first:  # a previous demo server left the name loaded
+            try:
+                self.admin.post("unload_lora_adapter", {"lora_name": served})
+                self.admin.post("load_lora_adapter", payload)
+            except Exception:  # noqa: BLE001 - report the original failure, not the "not found" from the retry
+                raise RuntimeError(f"loading {served} from {path} failed: {first}") from first
 
     def generate_fn(self, adapter: str):
         from grasp_grpo.batcher import role_generate_fn

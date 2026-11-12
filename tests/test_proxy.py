@@ -1,3 +1,4 @@
+import pytest
 from grasp_grpo.model import Action
 
 from grasp_demo.proxy import HFProxy, VLLMProxy
@@ -36,13 +37,18 @@ def test_hf_proxy_loads_the_first_adapter_as_base_and_switches():
 
 
 class FakeAdmin:
-    def __init__(self, fail_first_load=False):
-        self.calls, self.fail_first_load = [], fail_first_load
+    def __init__(self, fail=None, fail_once=None):
+        self.calls = []
+        self.fail = fail or {}            # (endpoint, lora_name) -> message, raised on every such call
+        self.fail_once = fail_once or {}  # same, raised only on the first such call
 
     def post(self, endpoint, payload):
-        self.calls.append((endpoint, payload["lora_name"]))
-        if self.fail_first_load and endpoint == "load_lora_adapter" and len(self.calls) == 1:
-            raise RuntimeError("already loaded")
+        key = (endpoint, payload["lora_name"])
+        self.calls.append(key)
+        if key in self.fail_once:
+            raise RuntimeError(self.fail_once.pop(key))
+        if key in self.fail:
+            raise RuntimeError(self.fail[key])
 
 
 class FakePolicy:
@@ -64,6 +70,36 @@ def test_vllm_proxy_loads_named_adapters_and_unloads_on_close():
 
 
 def test_vllm_proxy_reloads_a_name_left_by_an_old_server():
-    admin = FakeAdmin(fail_first_load=True)
+    admin = FakeAdmin(fail_once={("load_lora_adapter", "demo-sft"): "already loaded"})
     VLLMProxy("http://x/v1", "key", {"sft": ADAPTERS["sft"]}, admin=admin, policy_factory=lambda served, path: FakePolicy(served))
     assert admin.calls == [("load_lora_adapter", "demo-sft"), ("unload_lora_adapter", "demo-sft"), ("load_lora_adapter", "demo-sft")]
+
+
+def test_vllm_proxy_reload_failure_surfaces_the_original_load_error():
+    admin = FakeAdmin(fail_once={("load_lora_adapter", "demo-sft"): "bad path"},
+                      fail={("unload_lora_adapter", "demo-sft"): "not found"})
+    with pytest.raises(RuntimeError, match="bad path") as info:
+        VLLMProxy("http://x/v1", "key", {"sft": ADAPTERS["sft"]}, admin=admin, policy_factory=lambda served, path: FakePolicy(served))
+    assert "not found" not in str(info.value)
+    assert str(info.value.__cause__) == "bad path"
+
+
+def test_vllm_proxy_partial_failure_unloads_what_was_loaded():
+    admin = FakeAdmin(fail={("load_lora_adapter", "demo-grpo"): "out of memory",
+                            ("unload_lora_adapter", "demo-grpo"): "not found"})
+    with pytest.raises(RuntimeError, match="out of memory"):
+        VLLMProxy("http://x/v1", "key", ADAPTERS, admin=admin, policy_factory=lambda served, path: FakePolicy(served))
+    assert ("unload_lora_adapter", "demo-sft") in admin.calls
+
+
+def test_vllm_proxy_policy_failure_unloads_the_adapter_just_loaded():
+    def factory(served, path):
+        if served == "demo-grpo":
+            raise RuntimeError("policy init failed")
+        return FakePolicy(served)
+
+    admin = FakeAdmin()
+    with pytest.raises(RuntimeError, match="policy init failed"):
+        VLLMProxy("http://x/v1", "key", ADAPTERS, admin=admin, policy_factory=factory)
+    assert admin.calls == [("load_lora_adapter", "demo-sft"), ("load_lora_adapter", "demo-grpo"),
+                           ("unload_lora_adapter", "demo-sft"), ("unload_lora_adapter", "demo-grpo")]
