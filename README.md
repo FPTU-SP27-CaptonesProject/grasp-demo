@@ -57,3 +57,16 @@ python scripts/fetch_checkpoint.py doancuavahk/grasp-grpo-checkpoints grpo-s250 
 - Delete any sample runs from `runs/` before presenting.
 - The demo's retrieval count for GRASP includes the initial question search, while the report counts QF searches only,
   so the demo shows one more.
+
+## Rented box in one script (defense day)
+On a fresh Vast box with **2 GPUs** (2x RTX 4090), as root:
+```bash
+git clone -b feat/demo-backends https://github.com/FPTU-SP27-CaptonesProject/grasp-demo.git /workspace/grasp-demo
+bash /workspace/grasp-demo/scripts/vast_demo.sh setup    # once, ~20-30 min; asks for HF login and the Bedrock key
+bash /workspace/grasp-demo/scripts/vast_demo.sh start    # reader + proxy (vLLM, as in the report evals) + demo
+bash /workspace/grasp-demo/scripts/vast_demo.sh prerun   # runs showcase/<ckpt>.json, packs /workspace/demo-runs.tgz
+```
+On your PC: `ssh -p <port> root@<host> -L 7860:localhost:7860`, open http://localhost:7860. Copy
+`/workspace/demo-runs.tgz` back and unpack it into this folder: History can then replay every pre-run with no model,
+which is the fallback if the box or the network fails during the defense. `GRPO_CKPT=s100 bash ... setup` picks
+another checkpoint (add `showcase/s100.json` for its showcase). `vast_demo.sh stop` stops everything.
