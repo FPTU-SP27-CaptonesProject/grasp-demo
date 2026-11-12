@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import queue
 import threading
 import time
 import uuid
@@ -18,18 +17,25 @@ class DemoRun:
     request: dict[str, Any]
     created_at: float = field(default_factory=time.time)
     events: list[dict[str, Any]] = field(default_factory=list)
-    queue: queue.Queue[dict[str, Any] | None] = field(default_factory=queue.Queue)
-    lock: threading.Lock = field(default_factory=threading.Lock)
     closed: bool = False
+    changed: threading.Condition = field(default_factory=threading.Condition)
 
     def publish(self, event: dict[str, Any]) -> None:
-        with self.lock:
+        with self.changed:
             self.events.append(event)
-        self.queue.put(event)
+            self.changed.notify_all()
 
     def close(self) -> None:
-        self.closed = True
-        self.queue.put(None)
+        with self.changed:
+            self.closed = True
+            self.changed.notify_all()
+
+    def wait_from(self, index: int, timeout: float = 15.0) -> tuple[list[dict[str, Any]], bool]:
+        """Events from `index` on (waiting up to `timeout` for one), and whether the run has closed."""
+        with self.changed:
+            if index >= len(self.events) and not self.closed:
+                self.changed.wait(timeout)
+            return list(self.events[index:]), self.closed
 
 
 class RunStore:
@@ -52,7 +58,9 @@ class RunStore:
     def persist(self, run: DemoRun) -> Path:
         created = time.strftime("%Y%m%d-%H%M%S", time.localtime(run.created_at))
         path = self.runs_dir / f"{created}-{run.run_id}.jsonl"
-        rows = [{"type": "request", "data": run.request, "run_id": run.run_id, "created_at": run.created_at}, *run.events]
+        with run.changed:
+            events = list(run.events)
+        rows = [{"type": "request", "data": run.request, "run_id": run.run_id, "created_at": run.created_at}, *events]
         path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
         return path
 
@@ -75,20 +83,15 @@ class RunStore:
 
 
 async def event_stream(run: DemoRun) -> AsyncIterator[str]:
-    """Send already-published events first, then follow the run until it closes."""
-    with run.lock:
-        existing = list(run.events)
-    for event in existing:
-        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-    already_sent = len(existing)
+    """Every event of the run for this connection alone (its own read position), then a close event."""
+    sent = 0
     while True:
-        item = await asyncio.to_thread(run.queue.get)
-        if item is None:
+        batch, closed = await asyncio.to_thread(run.wait_from, sent)
+        for event in batch:
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        sent += len(batch)
+        if closed and not batch:
             yield "event: close\ndata: {}\n\n"
             return
-        # The queue contains the same events that were copied above. Only
-        # events arriving after the initial snapshot should be streamed here.
-        if already_sent:
-            already_sent -= 1
-            continue
-        yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+        if not batch:
+            yield ": keepalive\n\n"
