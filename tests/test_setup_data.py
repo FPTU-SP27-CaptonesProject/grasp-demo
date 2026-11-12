@@ -82,3 +82,22 @@ def test_build_gold_titles_reads_titles_for_the_question_set(tmp_path):
     ids.write_text(json.dumps({"ids": ["a"]}), encoding="utf-8")
     titles = build_gold_titles(qa, ids, {"wiki18": {"index_dir": str(corpus), "triple_cache": ""}})
     assert titles == {"d1": "Up (2009 film)", "d2": "Pete Docter"}
+
+
+def test_prewarm_collects_the_question_and_every_qf_query_per_corpus():
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location("prewarm", Path(__file__).resolve().parents[1] / "scripts" / "prewarm_triples.py")
+    prewarm = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prewarm)
+    examples = {"a": {"id": "a", "question": "Q a?", "metadata": {"dataset": "wiki18"}},
+                "b": {"id": "b", "question": "Q b?", "metadata": {"dataset": "2wiki_ircot"}}}
+    report = {"predictions": [
+        {"id": "a", "actions": [{"role": "rd", "response": "Yes"},
+                                {"role": "qf", "response": "Reasoning Chain: None\nKnowledge Gap: who\nQuery: director of Up"},
+                                {"role": "qf", "response": "garbage"}]},
+        {"id": "b", "actions": []}]}
+    wanted = prewarm.queries_by_corpus([report], examples, None)
+    assert wanted == {"wiki18": {"Q a?", "director of Up"}, "2wiki_ircot": {"Q b?"}}
+    assert prewarm.queries_by_corpus([report], examples, {"b"}) == {"2wiki_ircot": {"Q b?"}}
