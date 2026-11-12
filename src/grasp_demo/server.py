@@ -24,7 +24,7 @@ from .store import DemoRun, RunStore, event_stream
 class AskRequest(BaseModel):
     eval_id: str | None = None
     question: str | None = None
-    corpus: str = "wiki18"
+    corpus: str = "all"  # free questions: merged corpus by default
     columns: list[str] = Field(default_factory=lambda: list(COLUMNS))
 
 

@@ -1,5 +1,6 @@
 const LABELS = { rag_7b: 'RAG · 7B', rag_235b: 'RAG · 235B', ircot_7b: 'IRCoT · 7B', grasp_sft: 'GRASP · SFT', grasp_grpo: 'GRASP · GRPO' };
 const ORDER = ['rag_7b', 'rag_235b', 'ircot_7b', 'grasp_sft', 'grasp_grpo'];
+const CORPUS = { wiki18: 'wiki18', hotpotqa_abstracts_2017: 'hotpot', '2wiki_ircot': '2wiki' };
 const state = { questions: [], selected: null, adapters: {}, stream: null, generation: 0, titles: {}, goldCount: 0, seen: {} };
 const $ = (selector) => document.querySelector(selector);
 
@@ -106,6 +107,7 @@ function docList(docs, columnName) {
     const item = el('li', doc.gold ? 'doc gold' : 'doc');
     const title = el('button', 'doc-title', `${doc.gold ? '★ ' : ''}${doc.title || doc.doc_id}`);
     title.onclick = () => openDoc(doc);
+    if (doc.corpus) title.append(el('span', 'corpus-tag', CORPUS[doc.corpus] || doc.corpus));
     item.append(title, el('span', 'snippet', (doc.text || '').slice(0, 200)));
     list.append(item);
     (state.seen[columnName] ||= {})[String(doc.doc_id)] = doc;

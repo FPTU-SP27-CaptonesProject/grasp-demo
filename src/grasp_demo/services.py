@@ -32,10 +32,14 @@ def load_reader(services: DemoServices) -> None:
 def load_retriever(services: DemoServices) -> None:
     from grasp_grpo.retrieval import CorpusRouter
 
+    from .allcorpora import RouterWithAll
+
     values = services.config["retrieval"]
-    services.retriever = CorpusRouter(values["corpus_config"], values.get("encoder", "intfloat/e5-large-v2"),
-                                      top_k=int(values.get("top_k", 10)), max_candidate_triples=int(values.get("max_candidate_triples", 20)),
-                                      encoder_device=values.get("encoder_device"))
+    top_k = int(values.get("top_k", 10))
+    router = CorpusRouter(values["corpus_config"], values.get("encoder", "intfloat/e5-large-v2"),
+                          top_k=top_k, max_candidate_triples=int(values.get("max_candidate_triples", 20)),
+                          encoder_device=values.get("encoder_device"))
+    services.retriever = RouterWithAll(router, top_k)  # adds the merged corpus "all" for free questions
 
 
 def load_proxy(services: DemoServices) -> None:
