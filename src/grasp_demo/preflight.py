@@ -14,6 +14,7 @@ from typing import Any
 
 THRESHOLDS = {"vram_gb": 15.0, "question_seconds": 60.0, "grasp_seconds": 40.0, "grpo_matches": 4}
 GRASP = ("grasp_sft", "grasp_grpo")
+BEDROCK = "rag_235b"  # excluded from health and speed: remote, not a local resource
 
 
 def pick_questions(rows: list[dict[str, Any]], per_dataset: int = 2) -> list[dict[str, Any]]:
@@ -34,12 +35,15 @@ def judge(result: dict[str, Any]) -> dict[str, bool | None]:
     for question in result["questions"]:
         if question["seconds"] > THRESHOLDS["question_seconds"]:
             speed = False
-        for column in GRASP:
-            values = question["columns"].get(column)
-            if values is not None and ("seconds" not in values or values["seconds"] > THRESHOLDS["grasp_seconds"]):
+        for column, values in question["columns"].items():
+            if column == BEDROCK:
+                continue
+            if "error" in values or "seconds" not in values:
                 speed = False
-    compared = [q.get("grpo_matches_report") for q in result["questions"] if q.get("grpo_matches_report") is not None]
-    matches = None if not compared else sum(compared) >= THRESHOLDS["grpo_matches"]
+            elif column in GRASP and values["seconds"] > THRESHOLDS["grasp_seconds"]:
+                speed = False
+    reported = [q.get("grpo_matches_report") for q in result["questions"]]
+    matches = None if not reported or any(value is None for value in reported) else sum(reported) >= THRESHOLDS["grpo_matches"]
     verdict = {"health": health, "vram": vram, "speed": speed, "grpo_matches": matches}
     verdict["local_ok"] = all(value is True for value in verdict.values())
     return verdict
@@ -80,37 +84,41 @@ def main(argv: list[str] | None = None) -> None:
     load_dotenv(config["_root"])
     sampler = VramSampler()
     sampler.start()
-    services = DemoServices.from_config(config)
-    for name, item in services.health.items():
-        print(f"{name:10s} {'ok' if item['ready'] else 'FAIL ' + item.get('reason', '')}")
-    reported = {}
-    if args.report:
-        reported = {p["id"]: p["prediction"] for p in json.loads(Path(args.report).read_text(encoding="utf-8")).get("predictions", [])}
-    columns = [column for column in COLUMNS if services.enabled(column)[0]]
-    questions = []
-    for row in pick_questions(load_eval_rows(config)):
-        def one(column: str, row=row) -> tuple[str, dict[str, Any]]:
-            events: list[tuple[str, dict[str, Any]]] = []
-            try:
-                prediction = run_column(services, column, row, lambda kind, data: events.append((kind, data)))["prediction"]
-                done = next(data for kind, data in reversed(events) if kind == "done")
-                return column, {"seconds": done["seconds"], "f1": done.get("f1"), "prediction": prediction}
-            except Exception as error:  # noqa: BLE001 - recorded; the judge counts it as a failure
-                return column, {"error": f"{type(error).__name__}: {error}"}
+    services = None
+    try:
+        services = DemoServices.from_config(config)
+        for name, item in services.health.items():
+            print(f"{name:10s} {'ok' if item['ready'] else 'FAIL ' + item.get('reason', '')}")
+        reported = {}
+        if args.report:
+            reported = {p["id"]: p["prediction"] for p in json.loads(Path(args.report).read_text(encoding="utf-8")).get("predictions", [])}
+        columns = [column for column in COLUMNS if services.enabled(column)[0]]
+        questions = []
+        for row in pick_questions(load_eval_rows(config)):
+            def one(column: str, row=row) -> tuple[str, dict[str, Any]]:
+                events: list[tuple[str, dict[str, Any]]] = []
+                try:
+                    prediction = run_column(services, column, row, lambda kind, data: events.append((kind, data)))["prediction"]
+                    done = next(data for kind, data in reversed(events) if kind == "done")
+                    return column, {"seconds": done["seconds"], "f1": done.get("f1"), "prediction": prediction}
+                except Exception as error:  # noqa: BLE001 - recorded; the judge counts it as a failure
+                    return column, {"error": f"{type(error).__name__}: {error}"}
 
-        started = time.monotonic()
-        with ThreadPoolExecutor(max_workers=max(1, len(columns))) as pool:
-            per_column = dict(pool.map(one, columns))
-        entry = {"id": row["id"], "dataset": row.get("metadata", {}).get("dataset"), "seconds": time.monotonic() - started, "columns": per_column}
-        grpo = per_column.get("grasp_grpo", {})
-        if row["id"] in reported and "prediction" in grpo:
-            entry["grpo_matches_report"] = exact(grpo["prediction"], [reported[row["id"]]]) == 1.0
-        questions.append(entry)
-        cells = "  ".join(f"{c}={v['seconds']:.1f}s" if "seconds" in v else f"{c}=ERR" for c, v in per_column.items())
-        print(f"{row['id']:>24s} {entry['seconds']:5.1f}s  {cells}")
-    sampler.stopped.set()
-    sampler.join(timeout=5)
-    services.close()
+            started = time.monotonic()
+            with ThreadPoolExecutor(max_workers=max(1, len(columns))) as pool:
+                per_column = dict(pool.map(one, columns))
+            entry = {"id": row["id"], "dataset": row.get("metadata", {}).get("dataset"), "seconds": time.monotonic() - started, "columns": per_column}
+            grpo = per_column.get("grasp_grpo", {})
+            if row["id"] in reported and "prediction" in grpo:
+                entry["grpo_matches_report"] = exact(grpo["prediction"], [reported[row["id"]]]) == 1.0
+            questions.append(entry)
+            cells = "  ".join(f"{c}={v['seconds']:.1f}s" if "seconds" in v else f"{c}=ERR" for c, v in per_column.items())
+            print(f"{row['id']:>24s} {entry['seconds']:5.1f}s  {cells}")
+    finally:
+        sampler.stopped.set()
+        sampler.join(timeout=5)
+        if services is not None:
+            services.close()
     result = {"config": str(Path(args.config).resolve()), "health": services.health, "columns": columns,
               "vram_peak_gb": None if sampler.peak_mib is None else round(sampler.peak_mib / 1024, 2), "questions": questions, "thresholds": THRESHOLDS}
     result["verdict"] = judge(result)

@@ -33,6 +33,25 @@ def test_errored_grasp_column_fails_speed_and_missing_report_is_unknown():
     assert unknown["grpo_matches"] is None and unknown["local_ok"] is False
 
 
+def test_errored_non_grasp_local_column_fails_speed():
+    broken = question(30.0)
+    broken["columns"]["rag_7b"] = {"error": "boom"}
+    assert judge(result(questions=[broken] * 6))["speed"] is False
+
+
+def test_errored_bedrock_column_does_not_fail_speed():
+    bedrock = question(30.0)
+    bedrock["columns"]["rag_235b"] = {"error": "bedrock down"}
+    verdict = judge(result(questions=[bedrock] * 6))
+    assert verdict["speed"] is True and verdict["local_ok"] is True
+
+
+def test_grpo_matches_unknown_when_any_question_lacks_a_report():
+    partial = [question(30.0, match=True)] * 5 + [question(30.0, match=None)]
+    verdict = judge(result(questions=partial))
+    assert verdict["grpo_matches"] is None and verdict["local_ok"] is False
+
+
 def test_pick_two_questions_per_dataset_in_file_order():
     rows = [{"id": f"{d}{i}", "metadata": {"dataset": d}} for d in ("a", "b") for i in range(3)]
     assert [row["id"] for row in pick_questions(rows)] == ["a0", "a1", "b0", "b1"]
