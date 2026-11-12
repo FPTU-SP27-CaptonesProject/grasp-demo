@@ -5,6 +5,7 @@
 #   git clone -b feat/demo-backends https://github.com/FPTU-SP27-CaptonesProject/grasp-demo.git /workspace/grasp-demo
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh setup    # once, ~20-30 min: trainer + vLLM, data, adapters, keys
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh start    # reader, proxy and demo in tmux; waits until healthy
+#   bash /workspace/grasp-demo/scripts/vast_demo.sh warm     # first time only, after start: triples for the showcase -> HF
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh tunnel   # public https://...trycloudflare.com link (no SSH needed)
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh prerun   # runs the showcase questions, packs runs/ for your PC
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh stop
@@ -21,7 +22,8 @@ SFT_DIR="${SFT_DIR:-/workspace/checkpoints/grasp-qwen2.5-3b-sft}"
 GRPO_CKPT="${GRPO_CKPT:-s250}"
 GRPO_LABEL="${GRPO_LABEL:-GRPO $GRPO_CKPT · test F1 0.552}"
 CKPT_ROOT="${CKPT_ROOT:-/workspace/ckpts}"
-TRIPLES="${TRIPLES:-cache/triples-train-20261112.sqlite}"
+DEMO_TRIPLES=cache/triples-demo.sqlite  # train cache + triples extracted for the showcase questions (vast_demo.sh warm)
+TRIPLES="${TRIPLES:-}"
 VAST_ENV="$TRAINER_DIR/config/vast.env"
 PY="$TRAINER_DIR/.venv/bin/python"
 CONFIG="$DEMO_DIR/demo.vast.yaml"
@@ -81,6 +83,14 @@ cmd_setup() {
   setv READER_GPU 0; setv READER_GPU_UTIL 0.85; setv POLICY_GPU 1; setv POLICY_GPU_UTIL 0.60; setv RETRIEVER_GPU 1
   setv SFT_CHECKPOINT "$SFT_DIR"; setv EXTRACT_TRIPLES 0
 
+  if [[ -z "$TRIPLES" ]]; then
+    if "$PY" -c 'import sys; from huggingface_hub import HfApi; sys.exit(0 if HfApi().file_exists("doancuavahk/grasp-retrieval", sys.argv[1], repo_type="dataset") else 1)' "$DEMO_TRIPLES"; then
+      TRIPLES=$DEMO_TRIPLES
+    else
+      TRIPLES=cache/triples-train-20261112.sqlite; echo "no $DEMO_TRIPLES on HF yet: run '$0 warm' once after start"
+    fi
+  fi
+  echo "$TRIPLES" > /workspace/.demo_triples
   say "data: corpora, $TRIPLES, dev.jsonl, test_ids.json"
   (cd "$DEMO_DIR" && "$PY" scripts/fetch_data.py --root "$DATA_DIR" --trainer-dir "$TRAINER_DIR" --triples "$TRIPLES")
 
@@ -90,7 +100,7 @@ cmd_setup() {
   cp "$DEMO_DIR/showcase/$GRPO_CKPT.json" "$DATA_DIR/showcase.json" 2>/dev/null || echo "no showcase/$GRPO_CKPT.json: the showcase filter will be empty"
 
   write_config
-  say "setup done. Next: bash $0 start"
+  say "setup done. Next: bash $0 start, then bash $0 tunnel" 
 }
 
 write_config() {
@@ -161,6 +171,30 @@ cmd_prerun() {
   echo "  scp -P <port> root@<host>:/workspace/demo-runs.tgz . ; tar -xzf demo-runs.tgz -C D:\\DoAn\\grasp-demo"
 }
 
+cmd_warm() {
+  # Greedy evals of the showcase candidates with lazy triple extraction (Bedrock, a few tenths of a dollar), for
+  # both GRASP adapters, so the demo retrieves the same documents with triples; then the cache goes to HF so the
+  # next setup downloads it instead of extracting again. Needs reader + proxy running (start).
+  load_env
+  [[ -n "${BEDROCK_API_KEY:-}" ]] || die "BEDROCK_API_KEY missing in $DEMO_DIR/.env (rm it and rerun setup to enter it)"
+  local triples ids
+  triples="$DATA_DIR/grasp-retrieval/$(cat /workspace/.demo_triples 2>/dev/null || echo cache/triples-train-20261112.sqlite)"
+  ids="$DEMO_DIR/showcase/$GRPO_CKPT-candidates.json"; [[ -f "$ids" ]] || ids="$DEMO_DIR/showcase/$GRPO_CKPT.json"
+  # The key goes into vast.env without sed (a key may hold characters sed treats specially); never printed.
+  grep -v '^BEDROCK_API_KEY=' "$VAST_ENV" > "$VAST_ENV.tmp" && printf 'BEDROCK_API_KEY=%s\n' "$BEDROCK_API_KEY" >> "$VAST_ENV.tmp"
+  chmod 600 "$VAST_ENV.tmp" && mv "$VAST_ENV.tmp" "$VAST_ENV"
+  setv CORPUS_CONFIG "$DATA_DIR/corpus.json"; setv EXTRACT_TRIPLES 1; setv EXTRACT_TIMEOUT 90; setv EXTRACT_RETRIES 1; setv EXTRACT_BUDGET_USD 5
+  for adapter in "$CKPT_ROOT/$GRPO_CKPT" "$SFT_DIR"; do
+    say "warm: $(basename "$adapter") on $(basename "$ids")"
+    (cd "$TRAINER_DIR" && EVAL_ADAPTER="$adapter" EVAL_IDS="$ids" EVAL_OUTPUT="/workspace/warm-$(basename "$adapter").json" \
+      EVAL_ENCODER_DEVICE="cuda:${RETRIEVER_GPU:-1}" bash scripts/eval_adapter_vast.sh)
+  done
+  setv EXTRACT_TRIPLES 0
+  say "upload $triples -> doancuavahk/grasp-retrieval/$DEMO_TRIPLES"
+  "$PY" -c 'import sqlite3,sys; db=sqlite3.connect(sys.argv[1]); db.execute("PRAGMA wal_checkpoint(TRUNCATE)"); print(db.execute("select count(*) from triples").fetchone()[0], "triples rows"); db.close()' "$triples"
+  "$TRAINER_DIR/.venv/bin/hf" upload doancuavahk/grasp-retrieval "$triples" "$DEMO_TRIPLES" --repo-type dataset
+}
+
 cmd_tunnel() {
   # Public HTTPS link without SSH (Cloudflare quick tunnel, no account). Anyone with the link can use the demo
   # (and the Bedrock key behind it): share it only with the audience; a restart gives a new link.
@@ -182,6 +216,7 @@ case "${1:-}" in
   start) cmd_start ;;
   prerun) cmd_prerun ;;
   tunnel) cmd_tunnel ;;
+  warm) cmd_warm ;;
   stop) cmd_stop ;;
   *) sed -n '2,12p' "$0"; exit 2 ;;
 esac
