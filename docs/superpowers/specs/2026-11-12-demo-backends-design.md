@@ -115,7 +115,10 @@ runs_dir: runs
   - mỗi kết nối tự giữ vị trí đã đọc;
   - nhiều tab cùng xem một lần chạy đều nhận đủ sự kiện, không trùng.
 - **API thêm:**
-  - `GET /api/doc/{corpus}/{doc_id}`: trả toàn văn tài liệu, đọc từ `passages.sqlite`;
+  - ~~`GET /api/doc/{corpus}/{doc_id}`~~: bỏ khi lập kế hoạch. `passages.sqlite` không có index trên `doc_id`,
+    nên tra cứu trong wiki18 phải quét cả bảng. Sự kiện `retrieve` đã chứa toàn văn từng tài liệu, nên giao diện
+    mở toàn văn từ chính sự kiện đó. Danh sách gold trong phần câu hỏi hiện doc id và đánh dấu "tìm thấy bởi …"
+    khi có cột truy xuất được tài liệu đó.
   - `GET /api/eval?showcase=1`: chỉ trả các câu tiêu biểu;
   - `POST /api/prerun`: chạy lần lượt các câu tiêu biểu và lưu replay. Mỗi lúc chỉ được một lượt; đang chạy thì trả 409.
 - `runners.py` giữ nguyên cách gọi, nhưng lấy `generate_fn` từ proxy, dù backend là `hf` hay `vllm`.

@@ -1,0 +1,16 @@
+# Vast box with the eval stack running (run_reader_vast.sh on :8000, run_policy_vast.sh on :8001). Run the demo
+# on the box, then from your PC: ssh -p <port> root@<host> -L 7860:localhost:7860 and open http://localhost:7860
+reader:   {url: http://localhost:8000/v1, model: Qwen/Qwen2.5-7B-Instruct, tokenizer: Qwen/Qwen2.5-7B-Instruct, api_key_env: READER_API_KEY}
+strong:   {url: https://bedrock-mantle.ap-southeast-2.api.aws/v1, model: qwen.qwen3-235b-a22b-2507, timeout: 60, retries: 1}
+proxy:
+  backend: vllm
+  url: http://localhost:8001/v1
+  api_key_env: READER_API_KEY
+  adapters:
+    sft:  {path: /workspace/checkpoints/grasp-qwen2.5-3b-sft, label: "SFT"}
+    grpo: {path: /workspace/ckpts/s100, label: "GRPO s100"}
+retrieval: {corpus_config: /workspace/data/corpus.json, top_k: 10, max_candidate_triples: 20, encoder: intfloat/e5-large-v2, encoder_device: "cuda:1"}
+ircot:    {max_steps: 5, docs_per_step: 3}
+grasp:    {max_steps: 5}
+eval:     {qa: /workspace/data/grasp-gold-evidence/dev.jsonl, ids: /workspace/data/test_ids.json, showcase: /workspace/data/showcase.json}
+runs_dir: runs
