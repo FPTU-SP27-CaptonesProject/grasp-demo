@@ -51,7 +51,10 @@ def run_column(services, column: str, example: dict[str, Any], emit: ColumnEmit)
         result = run_ircot(services.reader, bound, example, max_steps=int(config.get("max_steps", 5)), docs_per_step=int(config.get("docs_per_step", 3)), emit=traced)
     else:
         adapter = column.removeprefix("grasp_")
-        result = run_example(services.proxy.generate_fn(adapter), services.reader, bound, example, int(services.config.get("grasp", {}).get("max_steps", 5)), emit=traced)
+        grasp = services.config.get("grasp", {}) or {}
+        stop = grasp.get("max_empty_ki")  # demo-only stop rule; absent = the evaluated method
+        result = run_example(services.proxy.generate_fn(adapter), services.reader, bound, example, int(grasp.get("max_steps", 5)),
+                             emit=traced, max_empty_ki=int(stop) if stop else None)
 
     result["retrievals"] = result.get("retrievals", retrievals)
     metrics = score(example, result)

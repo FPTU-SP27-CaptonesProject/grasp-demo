@@ -77,3 +77,25 @@ def test_grasp_column_streams_steps_and_scores():
     done = events[-1][1]
     assert done["f1"] == f1(result["prediction"], ["A"]) == 1.0 and done["recall"] == 1.0 and done["retrievals"] == 2
     assert done["context_docs"] == len(result["context_doc_ids"]) == 2
+
+
+
+class NoTripleRetriever(Retriever):
+    def candidate_triples(self, query, passages, question=None):
+        return []
+
+
+class StopServices(Services):
+    config = {"ircot": {}, "grasp": {"max_empty_ki": 1}}
+
+    def __init__(self):
+        super().__init__()
+        self.retriever = NoTripleRetriever()
+
+
+def test_grasp_stop_rule_from_config():
+    events = []
+    result = run_column(StopServices(), "grasp_grpo", EXAMPLE, lambda kind, data: events.append((kind, data)))
+    assert result["prediction"] == "Insufficient information"
+    answer = next(d for k, d in events if k == "answer")
+    assert "no triple" in answer["reason"]

@@ -110,7 +110,10 @@ EOF
 
 cmd_start() {
   load_env
-  [[ -f "$CONFIG" ]] || write_config
+  # Pick up demo and trainer changes (the demo imports the trainer's GRASP loop) and rebuild the config
+  # from models.vast.yaml, so a restart always runs the latest of both.
+  git -C "$TRAINER_DIR" pull -q || echo "warning: could not update $TRAINER_DIR"
+  write_config
   say "reader (GPU $READER_GPU) and proxy (GPU $POLICY_GPU)"
   tmux has-session -t reader 2>/dev/null || tmux new -d -s reader "bash $TRAINER_DIR/scripts/run_reader_vast.sh 2>&1 | tee /workspace/reader.log"
   wait_http reader "${READER_URL%/}/models" "$READER_API_KEY"

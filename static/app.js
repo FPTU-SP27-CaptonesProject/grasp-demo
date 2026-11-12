@@ -154,6 +154,7 @@ function stepCard(type, data, columnName, t) {
   } else if (type === 'answer') {
     summary.textContent = 'Trả lời';
     body.append(el('p', 'answer-text', data.text || '(trống)'));
+    if (data.reason) body.append(el('div', 'muted', `Dừng sớm: ${data.reason.startsWith('no triple') ? 'không tìm thấy triple ở ' + (data.reason.match(/\d+/) || ['2'])[0] + ' lần truy xuất, nên kết luận không đủ thông tin' : data.reason}`));
   } else if (type === 'error') {
     summary.textContent = 'Lỗi';
     body.append(el('p', null, data.message));
