@@ -120,7 +120,10 @@ cmd_start() {
   say "demo"
   tmux kill-session -t demo 2>/dev/null || true
   # HF_HOME passed explicitly: a tmux server started earlier would not inherit this shell's environment.
-  tmux new -d -s demo "cd $DEMO_DIR && set -a && source $VAST_ENV && source $DEMO_DIR/.env && set +a && HF_HOME=$HF_HOME $PY -m grasp_demo --config $CONFIG --port 7860 2>&1 | tee /workspace/demo.log"
+  # Thread caps: on a many-core box OpenBLAS opens one thread per core in every column thread and dies with
+  # "BLAS : Program is Terminated. Because you tried to allocate too many memory regions" (2026-11-13).
+  local threads="OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=${DEMO_OMP_THREADS:-8} MKL_NUM_THREADS=${DEMO_OMP_THREADS:-8}"
+  tmux new -d -s demo "cd $DEMO_DIR && set -a && source $VAST_ENV && source $DEMO_DIR/.env && set +a && HF_HOME=$HF_HOME $threads $PY -m grasp_demo --config $CONFIG --port 7860 2>&1 | tee /workspace/demo.log"
   wait_http demo http://127.0.0.1:7860/api/health
   curl -s http://127.0.0.1:7860/api/health | "$PY" -c '
 import json, sys
