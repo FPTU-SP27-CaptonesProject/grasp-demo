@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grasp-demo"
+version = "0.1.0"
+description = "Interactive, replayable GRASP and RAG baseline demonstration."
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "huggingface_hub>=0.34,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.28"]
+
+[project.scripts]
+grasp-demo = "grasp_demo.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]

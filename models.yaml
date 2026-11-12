@@ -1,0 +1,28 @@
+reader:
+  url: http://localhost:8080/v1
+  model: qwen2.5-7b-instruct
+  tokenizer: Qwen/Qwen2.5-7B-Instruct
+  api_key: EMPTY
+strong:
+  url: https://bedrock-mantle.ap-southeast-2.api.aws/v1
+  model: qwen.qwen3-235b-a22b-2507
+proxy:
+  base: Qwen/Qwen2.5-3B-Instruct
+  adapters:
+    sft: checkpoints/grasp-qwen2.5-3b-sft
+    grpo: checkpoints/grpo-pilot-step100
+retrieval:
+  corpus_config: data/corpus.json
+  top_k: 10
+  max_candidate_triples: 20
+  encoder: intfloat/e5-large-v2
+  encoder_device: cpu
+ircot:
+  max_steps: 5
+  docs_per_step: 3
+grasp:
+  max_steps: 5
+eval:
+  qa: data/grasp-gold-evidence/dev.jsonl
+  ids: data/eval_ids.json
+runs_dir: runs
