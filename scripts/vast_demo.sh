@@ -58,8 +58,15 @@ cmd_setup() {
   export PATH="$HOME/.local/bin:$PATH"
   uv pip install -q --python "$PY" -e "$DEMO_DIR"
 
-  say "Hugging Face login (the checkpoint repo is private)"
-  "$TRAINER_DIR/.venv/bin/hf" auth whoami >/dev/null 2>&1 || "$TRAINER_DIR/.venv/bin/hf" auth login
+  say "Hugging Face access (the repos are private)"
+  # Check real read access, not just a stored token: a stale HF_TOKEN (e.g. set in the Vast account) passes
+  # `whoami` checks poorly and then fails every download with 401 (2026-11-13).
+  can_read() { "$PY" -c 'from huggingface_hub import HfApi; HfApi().repo_info("doancuavahk/grasp-retrieval", repo_type="dataset"); HfApi().repo_info("doancuavahk/grasp-grpo-checkpoints")' >/dev/null 2>&1; }
+  if ! can_read; then
+    [[ -n "${HF_TOKEN:-}" ]] && { echo "HF_TOKEN in the environment cannot read the repos: ignoring it"; unset HF_TOKEN; }
+    can_read || "$TRAINER_DIR/.venv/bin/hf" auth login
+    can_read || die "this Hugging Face account cannot read doancuavahk/grasp-retrieval and grasp-grpo-checkpoints"
+  fi
 
   say "keys"
   [[ -f "$VAST_ENV" ]] || cp "$TRAINER_DIR/config/vast.env.example" "$VAST_ENV"
