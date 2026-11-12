@@ -1,9 +1,11 @@
 """Configuration loading with paths resolved relative to the YAML file."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
-import os
+
+PATH_KEYS = (("retrieval", "corpus_config"), ("eval", "qa"), ("eval", "ids"), ("eval", "showcase"))
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -16,11 +18,17 @@ def load_config(path: str | Path) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise ValueError("models.yaml must contain a mapping")
     config["_root"] = source.parent
-    for section, key in (("retrieval", "corpus_config"), ("eval", "qa"), ("eval", "ids")):
+    for section, key in PATH_KEYS:
         if config.get(section, {}).get(key):
             config[section][key] = str(resolve(config, config[section][key]))
-    for name, adapter in config.get("proxy", {}).get("adapters", {}).items():
-        config["proxy"]["adapters"][name] = str(resolve(config, adapter))
+    adapters = config.get("proxy", {}).get("adapters", {}) or {}
+    for name, value in list(adapters.items()):
+        entry = {"path": value} if isinstance(value, str) else dict(value or {})
+        if not entry.get("path"):
+            raise ValueError(f"proxy.adapters.{name} needs a path")
+        entry["path"] = str(resolve(config, entry["path"]))
+        entry["label"] = str(entry.get("label") or Path(entry["path"]).name)
+        adapters[name] = entry
     if config.get("runs_dir"):
         config["runs_dir"] = str(resolve(config, config["runs_dir"]))
     return config
@@ -29,6 +37,14 @@ def load_config(path: str | Path) -> dict[str, Any]:
 def resolve(config: dict[str, Any], value: str | Path) -> Path:
     path = Path(value).expanduser()
     return path if path.is_absolute() else Path(config["_root"]) / path
+
+
+def reader_api_key(values: dict[str, Any]) -> str:
+    """Key from the environment variable named by `api_key_env`, else `api_key`, else EMPTY."""
+    name = values.get("api_key_env")
+    if name:
+        return os.environ.get(name) or "EMPTY"
+    return str(values.get("api_key") or "EMPTY")
 
 
 def load_dotenv(root: str | Path) -> None:
