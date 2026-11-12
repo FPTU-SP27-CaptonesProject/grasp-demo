@@ -5,6 +5,7 @@
 #   git clone -b feat/demo-backends https://github.com/FPTU-SP27-CaptonesProject/grasp-demo.git /workspace/grasp-demo
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh setup    # once, ~20-30 min: trainer + vLLM, data, adapters, keys
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh start    # reader, proxy and demo in tmux; waits until healthy
+#   bash /workspace/grasp-demo/scripts/vast_demo.sh tunnel   # public https://...trycloudflare.com link (no SSH needed)
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh prerun   # runs the showcase questions, packs runs/ for your PC
 #   bash /workspace/grasp-demo/scripts/vast_demo.sh stop
 #
@@ -135,7 +136,15 @@ for name, c in h["columns"].items():
     state = "ok" if c["enabled"] else "OFF: " + str(c["reason"])
     print("  %-11s %s" % (name, state))
 print("  GRPO label:", h["adapters"].get("grpo", {}).get("label"), "| eval questions:", h["eval_questions"], "| showcase:", h["showcase_questions"])'
-  say "open on your PC: ssh -p <port> root@<host> -L 7860:localhost:7860  ->  http://localhost:7860"
+  local url=""
+  [[ -f /workspace/tunnel.log ]] && tmux has-session -t tunnel 2>/dev/null \
+    && url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /workspace/tunnel.log | tail -1)
+  if [[ -n "$url" ]]; then
+    say "open: $url  (Cloudflare tunnel to this box)"
+  else
+    say "open from your PC through an SSH tunnel: ssh -p <port> root@<host> -L 7860:localhost:7860, then http://localhost:7860"
+    echo "   (no SSH? start a public tunnel: bash $0 tunnel)  NOTE: plain http://localhost:7860 on your PC is NOT this box"
+  fi
 }
 
 cmd_prerun() {
@@ -152,14 +161,27 @@ cmd_prerun() {
   echo "  scp -P <port> root@<host>:/workspace/demo-runs.tgz . ; tar -xzf demo-runs.tgz -C D:\\DoAn\\grasp-demo"
 }
 
+cmd_tunnel() {
+  # Public HTTPS link without SSH (Cloudflare quick tunnel, no account). Anyone with the link can use the demo
+  # (and the Bedrock key behind it): share it only with the audience; a restart gives a new link.
+  local bin=/workspace/cloudflared
+  [[ -x "$bin" ]] || { curl -sSLo "$bin" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 && chmod +x "$bin"; }
+  tmux has-session -t tunnel 2>/dev/null || tmux new -d -s tunnel "$bin tunnel --url http://127.0.0.1:7860 2>&1 | tee /workspace/tunnel.log"
+  local url=""
+  for _ in $(seq 1 30); do url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' /workspace/tunnel.log 2>/dev/null | tail -1); [[ -n "$url" ]] && break; sleep 2; done
+  [[ -n "$url" ]] || die "no tunnel URL yet; see /workspace/tunnel.log"
+  say "open: $url"
+}
+
 cmd_stop() {
-  for s in demo policy reader; do tmux kill-session -t "$s" 2>/dev/null && echo "stopped $s" || true; done
+  for s in tunnel demo policy reader; do tmux kill-session -t "$s" 2>/dev/null && echo "stopped $s" || true; done
 }
 
 case "${1:-}" in
   setup) cmd_setup ;;
   start) cmd_start ;;
   prerun) cmd_prerun ;;
+  tunnel) cmd_tunnel ;;
   stop) cmd_stop ;;
   *) sed -n '2,12p' "$0"; exit 2 ;;
 esac
