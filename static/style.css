@@ -43,7 +43,7 @@ details.event > summary { cursor:pointer; font-weight:600; } .time { margin-left
 .snippet { display:block; color:var(--muted); font-size:14px; }
 details.raw summary { color:var(--muted); font-size:13px; cursor:pointer; }
 pre { white-space:pre-wrap; overflow-wrap:anywhere; margin:6px 0 2px; color:var(--muted); font:13px/1.4 ui-monospace,Consolas,monospace; }
-.answer { margin-top:auto; padding:12px; border-top:1px solid var(--line); font-weight:700; font-size:17px; } .answer:empty { display:none; }
+footer.answer { margin-top:auto; padding:12px; border-top:1px solid var(--line); font-weight:700; font-size:17px; } footer.answer:empty { display:none; }
 dialog { color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:6px; width:min(760px, 94vw); max-height:86vh; }
 dialog header { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding-bottom:8px; }
 .doc-text { white-space:pre-wrap; line-height:1.6; }

@@ -1,6 +1,6 @@
 const LABELS = { rag_7b: 'RAG · 7B', rag_235b: 'RAG · 235B', ircot_7b: 'IRCoT · 7B', grasp_sft: 'GRASP · SFT', grasp_grpo: 'GRASP · GRPO' };
 const ORDER = ['rag_7b', 'rag_235b', 'ircot_7b', 'grasp_sft', 'grasp_grpo'];
-const state = { questions: [], selected: null, adapters: {}, stream: null, replaying: false };
+const state = { questions: [], selected: null, adapters: {}, stream: null, generation: 0 };
 const $ = (selector) => document.querySelector(selector);
 
 function el(tag, className, text) {
@@ -72,7 +72,8 @@ function stepCard(type, data, columnName, t) {
   const step = data.step ? ` · bước ${data.step}` : '';
   if (type === 'retrieve') {
     summary.textContent = `Truy xuất${step} (${(data.docs || []).length} tài liệu)`;
-    body.append(el('div', 'query', `Query: ${data.query}`), docList(data.docs || [], columnName));
+    if (data.query) body.append(el('div', 'query', `Query: ${data.query}`));
+    body.append(docList(data.docs || [], columnName));
   } else if (type === 'thought') {
     summary.textContent = `Suy nghĩ${step}`;
     body.append(el('p', null, data.text));
@@ -80,15 +81,20 @@ function stepCard(type, data, columnName, t) {
     summary.textContent = `RD${step}: ${data.retrieve ? 'cần truy xuất' : 'không truy xuất'}`;
   } else if (type === 'qf') {
     summary.textContent = `QF${step}`;
-    body.append(el('div', 'query', `Query: ${data.query}`));
+    if (data.query) body.append(el('div', 'query', `Query: ${data.query}`));
     if (data.chain && data.chain.length) body.append(el('div', 'muted', `Chuỗi: ${data.chain.map(triple).join(' → ')}`));
   } else if (type === 'ki') {
     summary.textContent = `KI${step}`;
     if (!data.candidates || !data.candidates.length) {
       body.append(el('div', 'muted', 'Không có triple ứng viên (tài liệu chưa có trong cache triple)'));
     } else {
-      body.append(el('div', 'triple', triple(data.candidates[data.chosen ?? 0])));
-      body.append(el('div', 'muted', data.added_doc ? `Thêm tài liệu ${data.added_doc} vào ngữ cảnh` : 'Tài liệu đã có trong ngữ cảnh'));
+      const picked = Number.isInteger(data.chosen) ? data.candidates[data.chosen] : null;
+      if (!picked) {
+        body.append(el('div', 'muted', 'Không chọn được triple'));
+      } else {
+        body.append(el('div', 'triple', triple(picked)));
+        body.append(el('div', 'muted', data.added_doc ? `Thêm tài liệu ${data.added_doc} vào ngữ cảnh` : 'Tài liệu đã có trong ngữ cảnh'));
+      }
     }
   } else if (type === 'answer') {
     summary.textContent = 'Trả lời';
@@ -119,8 +125,8 @@ function renderMetrics(host, d) {
     add(`EM ${num(d.em)}`, d.em >= 1);
   }
   if (d.recall != null) add(`Recall ${num(d.recall)}`, d.recall >= 1 ? true : d.recall <= 0 ? false : null);
-  add(`${d.seconds.toFixed(1)} s`);
-  add(`${d.retrievals} lần truy xuất`);
+  add(d.seconds == null ? '–' : `${Number(d.seconds).toFixed(1)} s`);
+  add(d.retrievals == null ? '–' : `${d.retrievals} lần truy xuất`);
 }
 
 function applyEvent(event) {
@@ -129,10 +135,10 @@ function applyEvent(event) {
   const data = event.data || {};
   if (event.type === 'done') { renderMetrics(host, data); return; }
   host.querySelector('.trace').append(stepCard(event.type, data, event.column, event.t || 0));
-  if (event.type === 'answer') host.querySelector('.answer').textContent = data.text || '(trống)';
+  if (event.type === 'answer') host.querySelector('footer.answer').textContent = data.text || '(trống)';
   if (event.type === 'error') {
     host.classList.add('failed');
-    host.querySelector('.metrics').textContent = 'Lỗi';
+    host.querySelector('.metrics').textContent = `Lỗi: ${data.message || 'không rõ nguyên nhân'}`;
   }
 }
 
@@ -162,6 +168,11 @@ async function loadQuestions() {
   const params = new URLSearchParams({ dataset: $('#dataset').value });
   if ($('#showcase').checked) params.set('showcase', '1');
   state.questions = await api(`/api/eval?${params}`);
+  if (state.selected && !state.questions.some((q) => q.question === state.selected.question)) {
+    state.selected = null;
+    $('#eval-search').value = '';
+    showQuestion(null);
+  }
   $('#eval-list').replaceChildren(...state.questions.map((q) => { const option = document.createElement('option'); option.value = q.question; return option; }));
 }
 
@@ -173,12 +184,14 @@ async function ask() {
   const body = free ? { question: free, corpus: $('#free-corpus').value, columns } : state.selected ? { eval_id: state.selected.id, columns } : null;
   if (!body) { notice('Chọn một câu trong tập test hoặc gõ câu hỏi tự do.'); return; }
   if (free) showQuestion(null);
-  if (state.stream) state.stream.close();
+  if (state.stream) { state.stream.close(); state.stream = null; }
+  const generation = ++state.generation;
   renderBoard(columns);
   const { run_id } = await api('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (generation !== state.generation) return;
   const stream = new EventSource(`/api/stream/${run_id}`);
   state.stream = stream;
-  stream.onmessage = (e) => applyEvent(JSON.parse(e.data));
+  stream.onmessage = (e) => { try { applyEvent(JSON.parse(e.data)); } catch (err) { /* skip malformed event */ } };
   stream.addEventListener('close', () => stream.close());
   stream.onerror = () => { if (stream.readyState === EventSource.CLOSED) notice('Mất kết nối tới server.'); stream.close(); };
 }
@@ -197,21 +210,25 @@ async function health() {
 }
 
 async function replay(row) {
+  const generation = ++state.generation;
   const events = await api(`/api/replay/${encodeURIComponent(row.file)}`);
+  if (generation !== state.generation) return;
   $('#history-dialog').close();
-  if (state.stream) state.stream.close();
+  if (state.stream) { state.stream.close(); state.stream = null; }
   showQuestion(row.request.example || null);
   renderBoard([...new Set(events.map((x) => x.column))]);
   const speed = Number($('#replay-speed').value);
   let previous = 0;
   for (const event of events) {
-    await new Promise((resolve) => setTimeout(resolve, Math.max(0, ((event.t - previous) * 1000) / speed)));
-    applyEvent(event);
-    previous = event.t;
+    const t = Number(event.t) || 0;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, ((t - previous) * 1000) / speed)));
+    if (generation !== state.generation) return;
+    try { applyEvent(event); } catch (err) { /* skip malformed event */ }
+    previous = t;
   }
 }
 
-async function showHistory() {
+async function refreshHistory() {
   const rows = await api('/api/history');
   $('#history-list').replaceChildren(...rows.map((row) => {
     const item = el('div', 'run');
@@ -222,15 +239,21 @@ async function showHistory() {
     item.append(button);
     return item;
   }));
-  $('#history-dialog').showModal();
+}
+async function showHistory() {
+  await refreshHistory();
+  if (!$('#history-dialog').open) $('#history-dialog').showModal();
 }
 
 async function prerun() {
-  try { await api('/api/prerun', { method: 'POST' }); } catch (e) { notice(e.message); }
+  try { await api('/api/prerun', { method: 'POST' }); } catch (e) { notice(e.message); return; }
   const poll = async () => {
-    const s = await api('/api/prerun');
+    let s;
+    try { s = await api('/api/prerun'); } catch (e) { notice(e.message); return; }
     $('#prerun-status').textContent = s.error ? `Lỗi: ${s.error}` : s.running ? `Đang chạy ${s.done}/${s.total}…` : `Xong ${s.done}/${s.total}`;
-    if (s.running) setTimeout(poll, 3000); else showHistory().catch((e) => notice(e.message));
+    if (s.running) { setTimeout(poll, 3000); return; }
+    if ($('#history-dialog').open) refreshHistory().catch((e) => notice(e.message));
+    else showHistory().catch((e) => notice(e.message));
   };
   poll();
 }
@@ -249,7 +272,10 @@ $('#history').onclick = () => showHistory().catch((e) => notice(e.message));
 $('#close-history').onclick = () => $('#history-dialog').close();
 $('#close-doc').onclick = () => $('#doc-dialog').close();
 $('#prerun').onclick = () => prerun();
-$('#theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+$('#theme').onclick = () => {
+  const current = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  setTheme(current === 'dark' ? 'light' : 'dark');
+};
 try { const saved = localStorage.getItem('grasp-theme'); if (saved) document.documentElement.dataset.theme = saved; } catch (e) { /* storage unavailable */ }
 loadQuestions().catch((e) => notice(e.message));
 health().catch((e) => { $('#health').textContent = `Không kiểm tra được dịch vụ: ${e.message}`; });
