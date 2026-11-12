@@ -1,144 +1,116 @@
-"""One-process shared models used by all demo columns."""
+"""Resources shared by every column, loaded once. A component that fails its probe disables only the
+columns that need it (with the reason); the server keeps running."""
 from __future__ import annotations
 
-import json
+import os
 import threading
-from dataclasses import dataclass, field
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .config import reader_api_key
+from .proxy import HFProxy, VLLMProxy
 
-@dataclass
-class ProxyPolicy:
-    model: Any
-    tokenizer: Any
-    names: dict[str, str]
-    lock: threading.Lock = field(default_factory=threading.Lock)
+NEEDS = {
+    "rag_7b": ("reader", "retriever"),
+    "rag_235b": ("strong", "retriever"),
+    "ircot_7b": ("reader", "retriever"),
+    "grasp_sft": ("reader", "retriever", "proxy"),
+    "grasp_grpo": ("reader", "retriever", "proxy"),
+}
 
-    def generate(self, adapter: str):
-        from grasp_grpo.batcher import role_generate_fn
-        from grasp_grpo.model import active_adapter, generate
 
-        if adapter not in self.names:
-            raise RuntimeError(f"unknown proxy adapter: {adapter}")
+def load_reader(services: DemoServices) -> None:
+    from grasp_grpo.reader import GraspReader, chat_renderer, openai_completion
 
-        def raw(prompt: str, **kwargs):
-            with self.lock, active_adapter(self.model, self.names[adapter]):
-                return generate(self.model, self.tokenizer, prompt, **kwargs)
+    values = services.config["reader"]
+    complete = openai_completion(values["url"], reader_api_key(values), values["model"], temperature=0.0)
+    complete("Say OK.", stop=None, max_tokens=4)  # probe: raises when the reader is down
+    services.reader = GraspReader(complete, chat_renderer(values.get("tokenizer") or values["model"]))
 
-        return role_generate_fn(raw, temperature=0.0, top_p=1.0)
+
+def load_retriever(services: DemoServices) -> None:
+    from grasp_grpo.retrieval import CorpusRouter
+
+    values = services.config["retrieval"]
+    services.retriever = CorpusRouter(values["corpus_config"], values.get("encoder", "intfloat/e5-large-v2"),
+                                      top_k=int(values.get("top_k", 10)), max_candidate_triples=int(values.get("max_candidate_triples", 20)),
+                                      encoder_device=values.get("encoder_device"))
+
+
+def load_proxy(services: DemoServices) -> None:
+    values = services.config["proxy"]
+    usable = {}
+    for name, entry in values.get("adapters", {}).items():
+        if Path(entry["path"], "adapter_config.json").is_file():
+            usable[name] = entry
+        else:
+            services.adapter_errors[name] = f"missing adapter_config.json in {entry['path']}"
+    if not usable:
+        raise FileNotFoundError("; ".join(services.adapter_errors.values()) or "no proxy adapters configured")
+    backend = values.get("backend", "hf")
+    if backend == "hf":
+        services.proxy = HFProxy(usable)
+    elif backend == "vllm":
+        key = os.environ.get(values.get("api_key_env", "READER_API_KEY")) or "EMPTY"
+        services.proxy = VLLMProxy(values["url"], key, usable)
+    else:
+        raise ValueError(f"unknown proxy backend {backend!r} (hf or vllm)")
+
+
+def load_strong(services: DemoServices) -> None:
+    from openai import OpenAI
+
+    from grasp_grpo.baselines import BEDROCK_URL, ChatReader
+
+    key = os.environ.get("BEDROCK_API_KEY")
+    if not key:
+        raise RuntimeError("BEDROCK_API_KEY is not set")
+    values = services.config["strong"]
+    client = OpenAI(base_url=values.get("url", BEDROCK_URL), api_key=key, timeout=float(values.get("timeout", 60)), max_retries=int(values.get("retries", 1)))
+    client.models.list()  # probe: GET /models checks the key and the endpoint
+    services.strong_reader = ChatReader(client, values["model"])
+
+
+LOADERS: dict[str, Callable[[Any], None]] = {"reader": load_reader, "retriever": load_retriever, "proxy": load_proxy, "strong": load_strong}
 
 
 class DemoServices:
-    """Load expensive resources once. Failed optional resources disable only their columns."""
-
-    def __init__(self, config: dict[str, Any]):
-        self.config = config
-        self.reader = None
-        self.strong_reader = None
-        self.retriever = None
-        self.proxy = None
+    def __init__(self, config: dict[str, Any], *, loaders: dict[str, Callable[[Any], None]] | None = None):
+        self.config, self.loaders = config, LOADERS if loaders is None else loaders  # {} = load nothing (UI checks)
+        self.reader = self.strong_reader = self.retriever = self.proxy = None
         self.retriever_lock = threading.Lock()
         self.health: dict[str, dict[str, Any]] = {}
-        self.adapter_metadata: dict[str, dict[str, Any]] = {}
+        self.adapter_errors: dict[str, str] = {}
+        adapters = config.get("proxy", {}).get("adapters", {}) or {}
+        self.adapter_metadata = {name: {"label": entry["label"], "path": entry["path"]} for name, entry in adapters.items()}
 
     @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "DemoServices":
-        services = cls(config)
-        services._load()
+    def from_config(cls, config: dict[str, Any], *, loaders: dict[str, Callable[[Any], None]] | None = None) -> DemoServices:
+        services = cls(config, loaders=loaders)
+        services.load()
         return services
 
-    def _component(self, name: str, loader) -> None:
-        try:
-            loader()
-            self.health[name] = {"ready": True}
-        except Exception as error:  # a presentation server must survive one unavailable column
-            self.health[name] = {"ready": False, "reason": f"{type(error).__name__}: {error}"}
-
-    def _load(self) -> None:
-        def reader() -> None:
-            from grasp_grpo.reader import GraspReader, chat_renderer, openai_completion
-
-            values = self.config["reader"]
-            self.reader = GraspReader(
-                openai_completion(values["url"], values.get("api_key", "EMPTY"), values["model"], temperature=0.0),
-                chat_renderer(values.get("tokenizer") or values["model"]),
-            )
-
-        def retriever() -> None:
-            from grasp_grpo.retrieval import CorpusRouter
-
-            values = self.config["retrieval"]
-            self.retriever = CorpusRouter(
-                values["corpus_config"], values.get("encoder", "intfloat/e5-large-v2"),
-                top_k=int(values.get("top_k", 10)),
-                max_candidate_triples=int(values.get("max_candidate_triples", 20)),
-                encoder_device=values.get("encoder_device"),
-            )
-
-        def proxy() -> None:
-            from grasp_grpo.model import load_policy
-
-            adapters = self.config["proxy"]["adapters"]
-            sft = adapters["sft"]
-            if not Path(sft, "adapter_config.json").is_file():
-                raise FileNotFoundError(f"missing SFT adapter: {sft}")
-            model, tokenizer, _ = load_policy(sft, trainable=False)
-            names = {"sft": "default"}
-            self.adapter_metadata["sft"] = _adapter_metadata(sft)
-            grpo = adapters.get("grpo")
-            if grpo and Path(grpo, "adapter_config.json").is_file():
-                model.load_adapter(grpo, adapter_name="grpo", is_trainable=False)
-                names["grpo"] = "grpo"
-                self.adapter_metadata["grpo"] = _adapter_metadata(grpo)
-            self.proxy = ProxyPolicy(model, tokenizer, names)
-
-        def strong() -> None:
-            from grasp_grpo.baselines import BEDROCK_URL, ChatReader
-            from openai import OpenAI
-            import os
-
-            key = os.environ.get("BEDROCK_API_KEY")
-            if not key:
-                raise RuntimeError("BEDROCK_API_KEY is not set")
-            values = self.config["strong"]
-            self.strong_reader = ChatReader(OpenAI(base_url=values.get("url", BEDROCK_URL), api_key=key, timeout=60, max_retries=3), values["model"])
-
-        self._component("reader", reader)
-        self._component("retriever", retriever)
-        self._component("proxy", proxy)
-        self._component("strong", strong)
+    def load(self) -> None:
+        for name, loader in self.loaders.items():
+            try:
+                loader(self)
+                self.health[name] = {"ready": True}
+            except Exception as error:  # a presentation server must survive one unavailable component
+                self.health[name] = {"ready": False, "reason": f"{type(error).__name__}: {error}"}
 
     def enabled(self, column: str) -> tuple[bool, str | None]:
-        needed = {
-            "rag_7b": ("reader", "retriever"),
-            "rag_235b": ("strong", "retriever"),
-            "ircot_7b": ("reader", "retriever"),
-            "grasp_sft": ("reader", "retriever", "proxy"),
-            "grasp_grpo": ("reader", "retriever", "proxy"),
-        }[column]
-        missing = [item for item in needed if not self.health.get(item, {}).get("ready")]
+        missing = [item for item in NEEDS[column] if not self.health.get(item, {}).get("ready")]
         if missing:
-            return False, "; ".join(self.health[item].get("reason", item) for item in missing)
-        if column == "grasp_grpo" and "grpo" not in self.proxy.names:
-            return False, "GRPO adapter is not available"
+            return False, "; ".join(self.health.get(item, {}).get("reason", f"{item} not loaded") for item in missing)
+        if column.startswith("grasp_"):
+            adapter = column.removeprefix("grasp_")
+            if adapter not in self.proxy.names:
+                return False, self.adapter_errors.get(adapter, f"adapter {adapter} is not loaded")
         return True, None
 
     def close(self) -> None:
+        if self.proxy is not None:
+            self.proxy.close()
         if self.retriever is not None:
             self.retriever.close()
-
-
-def _adapter_metadata(path: str) -> dict[str, Any]:
-    """Small, optional labels for the UI; malformed metrics never block a model."""
-    root = Path(path)
-    result: dict[str, Any] = {"path": str(root), "label": root.name}
-    config = root / "grpo_config.json"
-    if not config.is_file():
-        return result
-    try:
-        values = json.loads(config.read_text(encoding="utf-8"))
-        result.update({key: values[key] for key in ("step", "f1", "checkpoint") if key in values})
-    except (OSError, ValueError, TypeError):
-        pass
-    return result
