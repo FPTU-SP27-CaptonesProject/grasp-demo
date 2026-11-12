@@ -1,35 +1,66 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>GRASP Comparative Demo</title>
+    <title>GRASP Demo</title>
     <link rel="stylesheet" href="/static/style.css">
   </head>
   <body>
     <header class="topbar">
-      <div><strong>GRASP</strong><span>Comparative RAG Demo</span></div>
-      <div id="health" class="health">Checking services...</div>
-      <button id="theme" class="icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
+      <div class="brand"><strong>GRASP</strong><span>So sánh với các baseline RAG</span></div>
+      <div id="health" class="health">Đang kiểm tra dịch vụ…</div>
+      <button id="theme" class="icon" title="Đổi chế độ sáng/tối" aria-label="Đổi chế độ sáng/tối">◐</button>
     </header>
+    <div id="notice" class="notice" role="alert" hidden></div>
     <main>
-      <section class="controls" aria-label="Question controls">
-        <label>Dataset <select id="dataset"><option value="">All datasets</option><option value="2wiki_ircot">2Wiki</option><option value="hotpotqa_abstracts_2017">HotpotQA</option><option value="wiki18">NQ/Wiki18</option></select></label>
-        <label class="wide">Evaluation question <input id="eval-search" list="eval-list" placeholder="Search a benchmark question"></label>
+      <section class="controls" aria-label="Chọn câu hỏi">
+        <label>Dataset
+          <select id="dataset"><option value="">Tất cả</option><option value="2wiki_ircot">2Wiki</option><option value="hotpotqa_abstracts_2017">HotpotQA</option><option value="wiki18">NQ / Wiki18</option></select>
+        </label>
+        <label class="check"><input type="checkbox" id="showcase"> Câu tiêu biểu</label>
+        <label class="wide">Câu hỏi trong tập test <input id="eval-search" list="eval-list" placeholder="Gõ để tìm câu hỏi"></label>
         <datalist id="eval-list"></datalist>
-        <button id="random" class="icon" title="Choose a random evaluation question" aria-label="Choose random question">↻</button>
-        <span class="or">or</span>
-        <label class="wide">Free question <input id="free-question" placeholder="Ask a question"></label>
-        <label>Corpus <select id="free-corpus"><option value="wiki18">NQ/Wiki18</option><option value="2wiki_ircot">2Wiki</option><option value="hotpotqa_abstracts_2017">HotpotQA</option></select></label>
-        <fieldset id="columns"><legend>Methods</legend><label><input type="checkbox" value="rag_7b" checked> RAG 7B</label><label><input type="checkbox" value="rag_235b" checked> RAG 235B</label><label><input type="checkbox" value="ircot_7b" checked> IRCoT 7B</label><label><input type="checkbox" value="grasp_sft" checked> GRASP SFT</label><label><input type="checkbox" value="grasp_grpo" checked> GRASP GRPO</label></fieldset>
-        <button id="ask" class="ask">Ask</button><button id="history" class="icon" title="View saved runs" aria-label="View saved runs">◷</button>
+        <button id="random" class="icon" title="Chọn ngẫu nhiên" aria-label="Chọn ngẫu nhiên">↻</button>
+        <span class="or">hoặc</span>
+        <label class="wide">Câu hỏi tự do <input id="free-question" placeholder="Gõ câu hỏi bất kỳ"></label>
+        <label>Corpus
+          <select id="free-corpus"><option value="wiki18">NQ / Wiki18</option><option value="2wiki_ircot">2Wiki</option><option value="hotpotqa_abstracts_2017">HotpotQA</option></select>
+        </label>
+        <fieldset id="columns"><legend>Phương pháp</legend>
+          <label><input type="checkbox" value="rag_7b" checked> RAG 7B</label>
+          <label><input type="checkbox" value="rag_235b" checked> RAG 235B</label>
+          <label><input type="checkbox" value="ircot_7b" checked> IRCoT 7B</label>
+          <label><input type="checkbox" value="grasp_sft" checked> GRASP SFT</label>
+          <label><input type="checkbox" value="grasp_grpo" checked> GRASP GRPO</label>
+        </fieldset>
+        <button id="ask" class="ask">Hỏi</button>
+        <button id="history" class="icon" title="Lịch sử và phát lại" aria-label="Lịch sử">◷</button>
       </section>
-      <section id="question-info" class="question-info" hidden></section>
+      <section id="question-info" class="question-info" hidden>
+        <p id="question-text" class="question-text"></p>
+        <p><span class="muted">Đáp án đúng:</span> <strong id="gold-answer"></strong></p>
+        <div><span class="muted">Tài liệu gold:</span><ul id="gold-docs" class="gold-docs"></ul></div>
+      </section>
+      <p id="free-note" class="muted" hidden>Câu tự do không có đáp án nên không chấm điểm. Tài liệu chưa có trong cache triple sẽ không có triple cho KI.</p>
       <section id="board" class="board" aria-live="polite"></section>
     </main>
-    <dialog id="history-dialog"><header><strong>Saved Runs</strong><label>Replay speed <select id="replay-speed"><option value="1">1x</option><option value="4">4x</option></select></label><button class="icon" id="close-history" aria-label="Close">×</button></header><div id="history-list"></div></dialog>
-    <template id="column-template"><article class="column"><header><div><h2></h2><small class="checkpoint"></small></div><div class="metrics">Waiting</div></header><div class="trace"></div><footer class="answer"></footer></article></template>
-    <template id="event-template"><details class="event"><summary></summary><pre></pre></details></template>
+    <dialog id="history-dialog">
+      <header><strong>Lịch sử</strong>
+        <label>Tốc độ <select id="replay-speed"><option value="1">1×</option><option value="4">4×</option></select></label>
+        <button class="icon" id="close-history" aria-label="Đóng">×</button>
+      </header>
+      <div class="prerun"><button id="prerun">Chạy trước câu tiêu biểu</button><span id="prerun-status" class="muted"></span></div>
+      <div id="history-list"></div>
+    </dialog>
+    <dialog id="doc-dialog">
+      <header><strong id="doc-title"></strong><button class="icon" id="close-doc" aria-label="Đóng">×</button></header>
+      <p id="doc-meta" class="muted"></p>
+      <div id="doc-text" class="doc-text"></div>
+    </dialog>
+    <template id="column-template">
+      <article class="column"><header><div><h2></h2><small class="checkpoint"></small></div><div class="metrics">Đang chờ</div></header><div class="trace"></div><footer class="answer"></footer></article>
+    </template>
     <script src="/static/app.js"></script>
   </body>
 </html>
