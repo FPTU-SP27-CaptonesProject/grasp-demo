@@ -11,6 +11,6 @@ proxy:
     grpo: {path: /workspace/ckpts/s250, label: "GRPO s250 · test F1 0.552"}
 retrieval: {corpus_config: /workspace/data/corpus.json, top_k: 10, max_candidate_triples: 20, encoder: intfloat/e5-large-v2, encoder_device: "cuda:1"}
 ircot:    {max_steps: 5, docs_per_step: 3}
-grasp:    {max_steps: 5, max_empty_ki: 2}   # demo only: 2 searches without triples -> "Insufficient information"
+grasp:    {max_steps: 5, max_empty_ki: 3}   # demo only: 3 searches without triples -> "Insufficient information"
 eval:     {qa: /workspace/data/grasp-gold-evidence/dev.jsonl, ids: /workspace/data/test_ids.json, showcase: /workspace/data/showcase.json}
 runs_dir: runs
