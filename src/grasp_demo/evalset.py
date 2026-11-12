@@ -22,3 +22,15 @@ def load_eval_rows(config: dict[str, Any]) -> list[dict[str, Any]]:
     rows = read_examples(path)
     ids = load_ids(values.get("ids"))
     return [row for row in rows if row["id"] in ids] if ids else rows
+
+
+def load_gold_titles(config: dict[str, Any]) -> dict[str, str]:
+    """{doc_id: title} written by fetch_data next to test_ids.json (gold_titles.json); empty when missing."""
+    ids = (config.get("eval") or {}).get("ids")
+    path = Path(ids).with_name("gold_titles.json") if ids else None
+    if not path or not path.is_file():
+        return {}
+    try:
+        return {str(k): str(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+    except (OSError, ValueError):
+        return {}

@@ -104,3 +104,12 @@ def test_stream_still_closes_when_persist_fails(tmp_path, monkeypatch):
         run_id = client.post("/api/ask", json={"question": "Free?", "columns": ["rag_7b"]}).json()["run_id"]
         response = client.get(f"/api/stream/{run_id}")
         assert "event: close" in response.text
+
+
+def test_eval_returns_gold_document_titles(tmp_path):
+    config = make_config(tmp_path)
+    (tmp_path / "gold_titles.json").write_text(json.dumps({"doc": "Some Title"}), encoding="utf-8")
+    app = create_app(config, services=Services())
+    with TestClient(app) as client:
+        row = client.get("/api/eval").json()[0]
+        assert row["gold_docs"] == [{"id": "doc", "title": "Some Title"}]

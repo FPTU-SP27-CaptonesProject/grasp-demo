@@ -36,6 +36,7 @@
         </fieldset>
         <button id="ask" class="ask">Hỏi</button>
         <button id="history" class="icon" title="Lịch sử và phát lại" aria-label="Lịch sử">◷</button>
+        <button id="focus" class="toggle" title="Chỉ hiện IRCoT, GRASP · SFT và GRASP · GRPO bên dưới bảng tổng kết" aria-pressed="false">Tập trung</button>
       </section>
       <section id="question-info" class="question-info" hidden>
         <p id="question-text" class="question-text"></p>
@@ -43,6 +44,12 @@
         <div><span class="muted">Tài liệu gold:</span><ul id="gold-docs" class="gold-docs"></ul></div>
       </section>
       <p id="free-note" class="muted" hidden>Câu tự do không có đáp án nên không chấm điểm. Tài liệu chưa có trong cache triple sẽ không có triple cho KI.</p>
+      <section id="summary" class="summary" hidden>
+        <table>
+          <thead><tr><th>Phương pháp</th><th>Kết quả</th><th>Câu trả lời</th><th title="Số lần gọi retriever, tính cả lần đầu tìm bằng câu hỏi">Truy xuất</th><th title="Số tài liệu đưa cho reader">Ngữ cảnh</th><th title="Số tài liệu gold có trong ngữ cảnh">Gold</th><th>Thời gian</th></tr></thead>
+          <tbody id="summary-body"></tbody>
+        </table>
+      </section>
       <section id="board" class="board" aria-live="polite"></section>
     </main>
     <dialog id="history-dialog">

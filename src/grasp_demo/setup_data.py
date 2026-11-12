@@ -53,6 +53,31 @@ def check_eval_files(qa: Path, ids: Path) -> int:
     return len(wanted)
 
 
+def build_gold_titles(qa: Path, ids: Path, corpus_config: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Titles of the gold documents of the question set, for the UI. passages.sqlite has no index on doc_id
+    (a single lookup in wiki18 takes ~25 s), so this does one scan per corpus with all wanted ids at once."""
+    from grasp_grpo.data import read_examples
+
+    wanted_ids = {str(value) for value in json.loads(ids.read_text(encoding="utf-8"))["ids"]}
+    by_corpus: dict[str, set[str]] = {}
+    for row in read_examples(qa):
+        if row["id"] in wanted_ids:
+            by_corpus.setdefault(str(row["metadata"].get("dataset", "")), set()).update(row.get("gold_doc_ids", []))
+    titles: dict[str, str] = {}
+    for corpus, doc_ids in by_corpus.items():
+        if corpus not in corpus_config or not doc_ids:
+            continue
+        db = sqlite3.connect(f"file:{(Path(corpus_config[corpus]['index_dir']) / 'passages.sqlite').resolve().as_posix()}?mode=ro", uri=True)
+        try:
+            db.execute("CREATE TEMP TABLE wanted (doc_id TEXT PRIMARY KEY)")
+            db.executemany("INSERT OR IGNORE INTO temp.wanted VALUES (?)", [(d,) for d in doc_ids])
+            for doc_id, title in db.execute("SELECT p.doc_id, p.title FROM passages p JOIN temp.wanted w ON p.doc_id = w.doc_id"):
+                titles.setdefault(str(doc_id), str(title or ""))
+        finally:
+            db.close()
+    return titles
+
+
 def fetch_adapter(repo: str, name: str, root: Path, *, subfolder: str | None = None, revision: str | None = None, repo_type: str = "model", download=None) -> Path:
     if download is None:
         from huggingface_hub import snapshot_download as download
@@ -100,7 +125,9 @@ def main_data(argv: list[str] | None = None) -> None:
     config = corpus_config(root / "grasp-retrieval", root / "grasp-retrieval" / args.triples)
     count = check_eval_files(root / "grasp-gold-evidence" / "dev.jsonl", ids)
     (root / "corpus.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    print(json.dumps({"corpus_config": str(root / "corpus.json"), "test_questions": count, "triples": args.triples}))
+    titles = build_gold_titles(root / "grasp-gold-evidence" / "dev.jsonl", ids, config)
+    (root / "gold_titles.json").write_text(json.dumps(titles, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps({"corpus_config": str(root / "corpus.json"), "test_questions": count, "triples": args.triples, "gold_titles": len(titles)}))
 
 
 def main_checkpoint(argv: list[str] | None = None) -> None:

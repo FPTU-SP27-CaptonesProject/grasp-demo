@@ -62,3 +62,23 @@ def test_fetch_adapter_lifts_a_subfolder_to_the_top(tmp_path):
     assert target == tmp_path / "grpo-s100"
     assert sorted(p.name for p in target.iterdir()) == ["adapter_config.json", "adapter_model.safetensors"]
     assert not (tmp_path / ".staging").exists()
+
+
+def test_build_gold_titles_reads_titles_for_the_question_set(tmp_path):
+    from grasp_demo.setup_data import build_gold_titles
+
+    corpus = tmp_path / "wiki18"
+    corpus.mkdir()
+    db = sqlite3.connect(corpus / "passages.sqlite")
+    db.execute('CREATE TABLE passages ("row" INTEGER, doc_id TEXT, title TEXT, text TEXT)')
+    db.executemany("INSERT INTO passages VALUES (?, ?, ?, ?)", [(0, "d1", "Up (2009 film)", "x"), (1, "d2", "Pete Docter", "y"), (2, "d3", "Other", "z")])
+    db.commit()
+    db.close()
+    qa = tmp_path / "dev.jsonl"
+    qa.write_text("\n".join(json.dumps(r) for r in [
+        {"id": "a", "question": "Q?", "gold_answers": ["x"], "gold_doc_ids": ["d1", "d2", "missing"], "dataset": "wiki18"},
+        {"id": "b", "question": "Q2?", "gold_answers": ["x"], "gold_doc_ids": ["d3"], "dataset": "wiki18"}]), encoding="utf-8")
+    ids = tmp_path / "ids.json"
+    ids.write_text(json.dumps({"ids": ["a"]}), encoding="utf-8")
+    titles = build_gold_titles(qa, ids, {"wiki18": {"index_dir": str(corpus), "triple_cache": ""}})
+    assert titles == {"d1": "Up (2009 film)", "d2": "Pete Docter"}

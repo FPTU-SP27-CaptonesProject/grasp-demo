@@ -55,5 +55,6 @@ def run_column(services, column: str, example: dict[str, Any], emit: ColumnEmit)
 
     result["retrievals"] = result.get("retrievals", retrievals)
     metrics = score(example, result)
-    emit("done", {"seconds": time.monotonic() - started, "retrievals": result["retrievals"], **metrics})
+    emit("done", {"seconds": time.monotonic() - started, "retrievals": result["retrievals"],
+                  "context_docs": len(result.get("context_doc_ids", [])), **metrics})
     return result

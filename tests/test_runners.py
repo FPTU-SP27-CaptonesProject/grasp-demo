@@ -76,3 +76,4 @@ def test_grasp_column_streams_steps_and_scores():
     assert events[4][1]["docs"][0]["gold"] is True
     done = events[-1][1]
     assert done["f1"] == f1(result["prediction"], ["A"]) == 1.0 and done["recall"] == 1.0 and done["retrievals"] == 2
+    assert done["context_docs"] == len(result["context_doc_ids"]) == 2

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import load_config, load_dotenv
-from .evalset import load_eval_rows, load_ids
+from .evalset import load_eval_rows, load_gold_titles, load_ids
 from .runners import COLUMNS, run_column
 from .services import DemoServices
 from .store import DemoRun, RunStore, event_stream
@@ -34,6 +34,7 @@ def create_app(config_path: str | Path, *, services: DemoServices | None = None)
     store = RunStore(config.get("runs_dir", Path(config["_root"]) / "runs"))
     eval_rows = load_eval_rows(config)
     showcase_ids = load_ids((config.get("eval") or {}).get("showcase")) & {row["id"] for row in eval_rows}
+    gold_titles = load_gold_titles(config)
     services = services or DemoServices.from_config(config)
     started = time.monotonic()
     prerun: dict[str, Any] = {"running": False, "done": 0, "total": 0, "error": None}
@@ -95,7 +96,9 @@ def create_app(config_path: str | Path, *, services: DemoServices | None = None)
                 and (not needle or needle in row["question"].casefold())
                 and (not wanted or row["id"] in showcase_ids)]
         return [{"id": row["id"], "dataset": row.get("metadata", {}).get("dataset"), "question": row["question"],
-                 "gold_answers": row["gold_answers"], "gold_doc_ids": row.get("gold_doc_ids", []), "showcase": row["id"] in showcase_ids} for row in rows]
+                 "gold_answers": row["gold_answers"], "gold_doc_ids": row.get("gold_doc_ids", []),
+                 "gold_docs": [{"id": d, "title": gold_titles.get(d)} for d in row.get("gold_doc_ids", [])],
+                 "showcase": row["id"] in showcase_ids} for row in rows]
 
     def resolve(request: AskRequest) -> dict[str, Any]:
         if request.eval_id:
