@@ -55,13 +55,14 @@ cmd_setup() {
   (( gpus >= 2 )) || die "this script expects 2 GPUs (found $gpus); the single-GPU layout ran out of memory on 2026-11-12"
 
   say "trainer ($TRAINER_BRANCH) + vLLM venvs"
-  [[ -d "$TRAINER_DIR/.git" ]] || git clone -q -b "$TRAINER_BRANCH" https://github.com/FPTU-SP27-CaptonesProject/grasp-grpo-trainer.git "$TRAINER_DIR"
-  git -C "$TRAINER_DIR" pull -q
+  # A trainer copy without .git (e.g. the submitted source next to the demo) is used as is.
+  [[ -d "$TRAINER_DIR" ]] || git clone -q -b "$TRAINER_BRANCH" https://github.com/FPTU-SP27-CaptonesProject/grasp-grpo-trainer.git "$TRAINER_DIR"
+  [[ -d "$TRAINER_DIR/.git" ]] && git -C "$TRAINER_DIR" pull -q
   [[ -x "$PY" && -x /workspace/grasp-reader-venv/bin/vllm ]] || bash "$TRAINER_DIR/scripts/setup_vast.sh"
   export PATH="$HOME/.local/bin:$PATH"
   uv pip install -q --python "$PY" -e "$DEMO_DIR"
 
-  say "Hugging Face access (the repos are private)"
+  say "Hugging Face access"
   # Check real read access, not just a stored token: a stale HF_TOKEN (e.g. set in the Vast account) passes
   # `whoami` checks poorly and then fails every download with 401 (2026-11-13).
   can_read() { "$PY" -c 'from huggingface_hub import HfApi; HfApi().repo_info("doancuavahk/grasp-retrieval", repo_type="dataset"); HfApi().repo_info("doancuavahk/grasp-grpo-checkpoints")' >/dev/null 2>&1; }
@@ -123,7 +124,7 @@ cmd_start() {
   load_env
   # Pick up demo and trainer changes (the demo imports the trainer's GRASP loop) and rebuild the config
   # from models.vast.yaml, so a restart always runs the latest of both.
-  git -C "$TRAINER_DIR" pull -q || echo "warning: could not update $TRAINER_DIR"
+  [[ -d "$TRAINER_DIR/.git" ]] && { git -C "$TRAINER_DIR" pull -q || echo "warning: could not update $TRAINER_DIR"; }
   write_config
   say "reader (GPU $READER_GPU) and proxy (GPU $POLICY_GPU)"
   tmux has-session -t reader 2>/dev/null || tmux new -d -s reader "bash $TRAINER_DIR/scripts/run_reader_vast.sh 2>&1 | tee /workspace/reader.log"
